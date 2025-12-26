@@ -1,0 +1,507 @@
+/**
+ * Howler.js Audio Engine
+ *
+ * Singleton manager for audio playback using Howler.js
+ * Handles: play, pause, seek, volume, track changes, events
+ */
+
+import { Howl } from "howler";
+
+export type HowlerEventType =
+    | "play"
+    | "pause"
+    | "stop"
+    | "end"
+    | "seek"
+    | "volume"
+    | "load"
+    | "loaderror"
+    | "playerror"
+    | "timeupdate";
+
+export type HowlerEventCallback = (data?: any) => void;
+
+interface HowlerEngineState {
+    currentSrc: string | null;
+    isPlaying: boolean;
+    currentTime: number;
+    duration: number;
+    volume: number;
+    isMuted: boolean;
+}
+
+class HowlerEngine {
+    private howl: Howl | null = null;
+    private timeUpdateInterval: NodeJS.Timeout | null = null;
+    private eventListeners: Map<HowlerEventType, Set<HowlerEventCallback>> =
+        new Map();
+    private state: HowlerEngineState = {
+        currentSrc: null,
+        isPlaying: false,
+        currentTime: 0,
+        duration: 0,
+        volume: 1,
+        isMuted: false,
+    };
+    private isLoading: boolean = false; // Guard against duplicate loads
+    private userInitiatedPlay: boolean = false; // Track if play was user-initiated
+    private retryCount: number = 0; // Track retry attempts
+    private maxRetries: number = 3; // Max retry attempts for load errors
+    private pendingAutoplay: boolean = false; // Track pending autoplay for retries
+    private lastFormat: string | undefined; // Store format for retries
+    private readonly popFadeMs: number = 10; // ms - micro-fade to reduce click/pop on track changes
+    private shouldRetryLoads: boolean = false; // Only retry transient load errors where it helps (Android WebView)
+    private cleanupTimeoutId: NodeJS.Timeout | null = null; // Track cleanup timeout to prevent race conditions
+
+    constructor() {
+        // Initialize event listener maps
+        const events: HowlerEventType[] = [
+            "play",
+            "pause",
+            "stop",
+            "end",
+            "seek",
+            "volume",
+            "load",
+            "loaderror",
+            "playerror",
+            "timeupdate",
+        ];
+        events.forEach((event) => this.eventListeners.set(event, new Set()));
+    }
+
+    /**
+     * Load and optionally play a new audio source
+     * @param src - Audio URL
+     * @param autoplay - Whether to auto-play after loading
+     * @param format - Audio format hint (mp3, flac, etc.) - required for URLs without extensions
+     */
+    load(
+        src: string,
+        autoplay: boolean = false,
+        format?: string,
+        isRetry: boolean = false
+    ): void {
+        // Don't reload if same source and already loaded
+        if (this.state.currentSrc === src && this.howl) {
+            if (autoplay && !this.state.isPlaying) {
+                this.play();
+            }
+            return;
+        }
+
+        // Prevent duplicate loads - if already loading this URL, skip
+        if (this.isLoading && this.state.currentSrc === src) {
+            return;
+        }
+
+        // Set loading guard immediately
+        this.isLoading = true;
+
+        // Simple instant switch - no crossfade (crossfade caused duplicate playback bugs)
+        // Just stop current track and load new one
+        this.cleanup();
+
+        this.state.currentSrc = src;
+
+        // Detect if running in Android WebView (for graceful degradation)
+        const isAndroidWebView = typeof navigator !== "undefined" && 
+            /wv/.test(navigator.userAgent.toLowerCase()) && 
+            /android/.test(navigator.userAgent.toLowerCase());
+        this.shouldRetryLoads = isAndroidWebView;
+
+        // Check if this is a podcast/audiobook stream (they need HTML5 Audio for Range request support)
+        const isPodcastOrAudiobook = src.includes("/api/podcasts/") || src.includes("/api/audiobooks/");
+
+        // Build Howl config
+        // Note: On Android WebView, HTML5 Audio causes crackling/popping on track changes
+        // Use Web Audio API on Android for smoother playback (trades streaming for quality)
+        // EXCEPTION: Podcasts always use HTML5 Audio because they need Range request support
+        // for seeking in large files. Web Audio would try to download the entire ~100MB file.
+        const howlConfig: any = {
+            src: [src],
+            html5: isPodcastOrAudiobook || !isAndroidWebView, // HTML5 for podcasts/audiobooks OR non-Android
+            autoplay: false, // We'll handle autoplay with fade
+            preload: true,
+            volume: this.state.isMuted ? 0 : this.state.volume,
+            // On Android WebView, increase the xhr timeout
+            ...(isAndroidWebView && { xhr: { timeout: 30000 } }),
+        };
+
+        // Store for potential retry
+        this.pendingAutoplay = autoplay;
+        this.lastFormat = format;
+        // Reset retry count only when this is NOT a retry attempt.
+        // If we reset on retries, we can end up in an infinite retry loop.
+        if (!isRetry) {
+            this.retryCount = 0;
+        }
+
+        // Add format hints (required for URLs without file extensions)
+        // Include multiple formats as fallbacks - browser will try them in order
+        if (format) {
+            // Put the expected format first, then common fallbacks
+            const formats = [format];
+            if (!formats.includes("mp3")) formats.push("mp3");
+            if (!formats.includes("flac")) formats.push("flac");
+            if (!formats.includes("mp4")) formats.push("mp4");
+            if (!formats.includes("webm")) formats.push("webm");
+            howlConfig.format = formats;
+        } else {
+            // Default format order if none specified
+            howlConfig.format = ["mp3", "flac", "mp4", "webm", "wav"];
+        }
+
+        this.howl = new Howl({
+            ...howlConfig,
+            onload: () => {
+                this.isLoading = false;
+                this.state.duration = this.howl?.duration() || 0;
+                this.emit("load", { duration: this.state.duration });
+
+                if (autoplay) {
+                    this.play();
+                }
+            },
+            onloaderror: (id, error) => {
+                console.error("[HowlerEngine] Load error:", error, "Attempt:", this.retryCount + 1);
+                this.isLoading = false;
+
+                // Retry logic for transient errors (common on Android WebView)
+                if (this.shouldRetryLoads && this.retryCount < this.maxRetries && this.state.currentSrc) {
+                    this.retryCount++;
+                    console.log(`[HowlerEngine] Retrying load (attempt ${this.retryCount}/${this.maxRetries})...`);
+
+                    // Save src before cleanup
+                    const srcToRetry = this.state.currentSrc;
+                    const autoplayToRetry = this.pendingAutoplay;
+                    const formatToRetry = this.lastFormat;
+
+                    // CRITICAL: Clean up the failed Howl instance BEFORE retrying
+                    // This prevents "HTML5 Audio pool exhausted" errors
+                    this.cleanup();
+
+                    // Wait a bit before retrying
+                    setTimeout(() => {
+                        this.load(srcToRetry, autoplayToRetry, formatToRetry, true);
+                    }, 500 * this.retryCount); // Exponential backoff
+                    return;
+                }
+
+                // All retries failed - clean up and emit error
+                this.retryCount = 0;
+                this.cleanup(); // Clean up failed instance
+                this.emit("loaderror", { error });
+            },
+            onplayerror: (id, error) => {
+                console.error("[HowlerEngine] Play error:", error);
+                // Clear playing state so UI shows play button
+                this.state.isPlaying = false;
+                this.userInitiatedPlay = false;
+                this.stopTimeUpdates();
+                this.emit("playerror", { error });
+                // Don't try to auto-recover - let the user click play again
+                // The 'unlock' mechanism requires a NEW user interaction which won't happen automatically
+            },
+            onplay: () => {
+                this.state.isPlaying = true;
+                this.userInitiatedPlay = false; // Clear flag after successful play
+                this.startTimeUpdates();
+                this.emit("play");
+            },
+            onpause: () => {
+                this.state.isPlaying = false;
+                this.userInitiatedPlay = false;
+                this.stopTimeUpdates();
+                this.emit("pause");
+            },
+            onstop: () => {
+                this.state.isPlaying = false;
+                this.state.currentTime = 0;
+                this.stopTimeUpdates();
+                this.emit("stop");
+            },
+            onend: () => {
+                this.state.isPlaying = false;
+                this.stopTimeUpdates();
+                this.emit("end");
+            },
+            onseek: () => {
+                if (this.howl) {
+                    this.state.currentTime = this.howl.seek() as number;
+                    this.emit("seek", { time: this.state.currentTime });
+                }
+            },
+        });
+    }
+
+    /**
+     * Play audio (user-initiated)
+     */
+    play(): void {
+        if (!this.howl) {
+            console.warn("[HowlerEngine] No audio loaded");
+            return;
+        }
+
+        // Don't reset volume if already playing
+        if (this.state.isPlaying) {
+            return;
+        }
+
+        // Mark as user-initiated for autoplay recovery
+        this.userInitiatedPlay = true;
+
+        // Ensure volume is set correctly before playing
+        const targetVolume = this.state.isMuted ? 0 : this.state.volume;
+        this.howl.volume(targetVolume);
+        this.howl.play();
+    }
+
+    /**
+     * Pause audio
+     */
+    pause(): void {
+        if (!this.howl || !this.state.isPlaying) return;
+        this.howl.pause();
+    }
+
+    /**
+     * Stop playback completely
+     */
+    stop(): void {
+        if (!this.howl) return;
+        this.howl.stop();
+    }
+
+    /**
+     * Seek to a specific time
+     * Simple seek - UI handles buffering state if needed
+     */
+    seek(time: number): void {
+        if (!this.howl) return;
+
+        this.state.currentTime = time;
+        this.howl.seek(time);
+        this.emit("seek", { time });
+    }
+
+    /**
+     * Force reload the audio from current source
+     * Used after cache is ready to enable seeking
+     */
+    reload(): void {
+        if (!this.state.currentSrc) return;
+
+        const src = this.state.currentSrc;
+        const format = this.howl ? (this.howl as any)._format : undefined;
+
+        this.cleanup();
+        this.load(src, false, format?.[0]);
+    }
+
+    /**
+     * Set volume (0-1)
+     */
+    setVolume(volume: number): void {
+        this.state.volume = Math.max(0, Math.min(1, volume));
+
+        if (this.howl && !this.state.isMuted) {
+            this.howl.volume(this.state.volume);
+        }
+
+        this.emit("volume", { volume: this.state.volume });
+    }
+
+    /**
+     * Mute/unmute
+     */
+    setMuted(muted: boolean): void {
+        this.state.isMuted = muted;
+
+        if (this.howl) {
+            this.howl.volume(muted ? 0 : this.state.volume);
+        }
+    }
+
+    /**
+     * Get current playback state
+     */
+    getState(): Readonly<HowlerEngineState> {
+        return { ...this.state };
+    }
+
+    /**
+     * Get current time (from Howler's state)
+     */
+    getCurrentTime(): number {
+        if (this.howl) {
+            const seek = this.howl.seek();
+            return typeof seek === "number" ? seek : 0;
+        }
+        return 0;
+    }
+
+    /**
+     * Get the ACTUAL current time from the HTML5 audio element
+     * This is more accurate than Howler's reported position after failed seeks
+     */
+    getActualCurrentTime(): number {
+        if (!this.howl) return 0;
+
+        try {
+            // Access the underlying HTML5 audio element
+            const sounds = (this.howl as any)._sounds;
+            if (sounds && sounds.length > 0 && sounds[0]._node) {
+                return sounds[0]._node.currentTime || 0;
+            }
+        } catch (e) {
+            // Fallback to Howler's reported time
+        }
+
+        return this.getCurrentTime();
+    }
+
+    /**
+     * Get duration
+     */
+    getDuration(): number {
+        return this.howl?.duration() || 0;
+    }
+
+    /**
+     * Check if currently playing
+     */
+    isPlaying(): boolean {
+        return this.howl?.playing() || false;
+    }
+
+    /**
+     * Subscribe to events
+     */
+    on(event: HowlerEventType, callback: HowlerEventCallback): void {
+        this.eventListeners.get(event)?.add(callback);
+    }
+
+    /**
+     * Unsubscribe from events
+     */
+    off(event: HowlerEventType, callback: HowlerEventCallback): void {
+        this.eventListeners.get(event)?.delete(callback);
+    }
+
+    /**
+     * Emit event to all listeners
+     */
+    private emit(event: HowlerEventType, data?: any): void {
+        this.eventListeners.get(event)?.forEach((callback) => {
+            try {
+                callback(data);
+            } catch (err) {
+                console.error(
+                    `[HowlerEngine] Event listener error (${event}):`,
+                    err
+                );
+            }
+        });
+    }
+
+    /**
+     * Start time update interval
+     */
+    private startTimeUpdates(): void {
+        this.stopTimeUpdates();
+
+        this.timeUpdateInterval = setInterval(() => {
+            if (this.howl && this.state.isPlaying) {
+                const seek = this.howl.seek();
+                if (typeof seek === "number") {
+                    this.state.currentTime = seek;
+                    this.emit("timeupdate", { time: seek });
+                }
+            }
+        }, 250); // Update 4 times per second
+    }
+
+    /**
+     * Stop time update interval
+     */
+    private stopTimeUpdates(): void {
+        if (this.timeUpdateInterval) {
+            clearInterval(this.timeUpdateInterval);
+            this.timeUpdateInterval = null;
+        }
+    }
+
+    /**
+     * Cleanup current Howl instance
+     */
+    private cleanup(): void {
+        this.stopTimeUpdates();
+
+        // Cancel any pending cleanup timeout to prevent race conditions
+        if (this.cleanupTimeoutId) {
+            clearTimeout(this.cleanupTimeoutId);
+            this.cleanupTimeoutId = null;
+        }
+
+        if (this.howl) {
+            const oldHowl = this.howl;
+            const wasPlaying = this.state.isPlaying;
+            const targetVolume = this.state.isMuted ? 0 : this.state.volume;
+
+            // Detach immediately so new loads don't race with cleanup.
+            this.howl = null;
+
+            try {
+                if (wasPlaying) {
+                    // Micro-fade before stop/unload to reduce click/pop artifacts.
+                    oldHowl.fade(targetVolume, 0, this.popFadeMs);
+                    this.cleanupTimeoutId = setTimeout(() => {
+                        this.cleanupTimeoutId = null;
+                        try {
+                            oldHowl.stop();
+                            oldHowl.unload();
+                        } catch {
+                            // ignore
+                        }
+                    }, this.popFadeMs + 2);
+                } else {
+                    // Synchronous cleanup when not playing - no race condition risk
+                    oldHowl.stop();
+                    oldHowl.unload();
+                }
+            } catch {
+                // Ignore errors during cleanup
+            }
+        }
+
+        // Note: Removed Howler.unload() - it was unloading ALL audio globally
+        // which caused issues. Individual howl.unload() calls are sufficient.
+
+        this.state.currentSrc = null;
+        this.state.isPlaying = false;
+        this.state.currentTime = 0;
+        this.state.duration = 0;
+    }
+
+    /**
+     * Destroy the engine completely
+     */
+    destroy(): void {
+        this.cleanup();
+        this.isLoading = false;
+        this.eventListeners.clear();
+        // Ensure cleanup timeout is cleared
+        if (this.cleanupTimeoutId) {
+            clearTimeout(this.cleanupTimeoutId);
+            this.cleanupTimeoutId = null;
+        }
+    }
+}
+
+// Export singleton instance
+export const howlerEngine = new HowlerEngine();
+
+// Also export class for testing
+export { HowlerEngine };

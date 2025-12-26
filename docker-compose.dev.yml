@@ -1,0 +1,71 @@
+# Lidify Dev Services
+# Run alongside npm dev servers for audio analysis
+#
+# Usage:
+#   docker compose -f docker-compose.dev.yml up -d
+#
+# This runs:
+#   - PostgreSQL (port 5433)
+#   - Redis (port 6379)
+#   - Audio Analyzer with ML models (Enhanced vibe matching)
+
+services:
+    postgres:
+        image: postgres:16-alpine
+        container_name: lidify_dev_db
+        environment:
+            POSTGRES_USER: lidify
+            POSTGRES_PASSWORD: lidify
+            POSTGRES_DB: lidify
+        volumes:
+            - postgres_dev_data:/var/lib/postgresql/data
+        ports:
+            - "5433:5432"
+        restart: unless-stopped
+        healthcheck:
+            test: ["CMD-SHELL", "pg_isready -U lidify -d lidify"]
+            interval: 10s
+            timeout: 5s
+            retries: 5
+
+    redis:
+        image: redis:7-alpine
+        container_name: lidify_dev_redis
+        ports:
+            - "6379:6379"
+        restart: unless-stopped
+        healthcheck:
+            test: ["CMD", "redis-cli", "ping"]
+            interval: 10s
+            timeout: 5s
+            retries: 5
+
+    # Audio Analyzer - Essentia with ML models for Enhanced vibe matching
+    audio-analyzer:
+        build:
+            context: ./services/audio-analyzer
+        container_name: lidify_audio_analyzer
+        environment:
+            # Connect to host machine's services (or Docker services)
+            REDIS_URL: redis://redis:6379
+            DATABASE_URL: postgresql://lidify:lidify@postgres:5432/lidify
+            # Music path inside container (mounted from host)
+            MUSIC_PATH: /music
+            BATCH_SIZE: 10
+            SLEEP_INTERVAL: 5
+        volumes:
+            # Mount your music library - UPDATE THIS PATH
+            - "${MUSIC_PATH:-C:/Users/kevin/Music}:/music:ro"
+        depends_on:
+            postgres:
+                condition: service_healthy
+            redis:
+                condition: service_healthy
+        restart: unless-stopped
+
+volumes:
+    postgres_dev_data:
+
+
+
+
