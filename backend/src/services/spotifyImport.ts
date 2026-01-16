@@ -1570,10 +1570,17 @@ class SpotifyImportService {
                 // Check if we can complete immediately
                 await this.checkImportCompletion(job.id);
 
+                // Re-fetch job state after checkImportCompletion may have updated it
+                const updatedJob = await getImportJob(job.id);
+                if (!updatedJob) {
+                    logger?.error(`[Spotify Import] Job ${job.id}: Job not found after completion check`);
+                    return;
+                }
+
                 // If still downloading, wait for completion
-                if (job.status === "downloading") {
+                if (updatedJob.status === "downloading") {
                     logger?.debug(
-                        `[Spotify Import] Job ${job.id}: Waiting for downloads to complete...`
+                        `[Spotify Import] Job ${updatedJob.id}: Waiting for downloads to complete...`
                     );
                     logger?.info(`Waiting for downloads to complete...`);
                 }
