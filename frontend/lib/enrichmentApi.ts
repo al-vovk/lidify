@@ -164,6 +164,16 @@ export const enrichmentApi = {
     },
 
     /**
+     * Clear all failure records (optionally filtered by type)
+     */
+    clearAllFailures: async (
+        entityType?: "artist" | "track" | "audio"
+    ): Promise<{ message: string; count: number }> => {
+        const query = entityType ? `?entityType=${entityType}` : "";
+        return api.delete(`/enrichment/failures${query}`);
+    },
+
+    /**
      * Get enrichment concurrency configuration
      */
     getConcurrency: async (): Promise<ConcurrencyConfig> => {
