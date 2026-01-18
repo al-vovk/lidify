@@ -161,21 +161,61 @@ router.post("/", async (req, res) => {
             }
         }
 
-        // Single album download - check for existing job first
-        const existingJob = await prisma.downloadJob.findFirst({
-            where: {
-                targetMbid: mbid,
-                status: { in: ["pending", "processing"] },
-            },
+        // Single album download - use transaction with row-level locking to prevent race conditions
+        // This prevents TOCTOU (Time-Of-Check-Time-Of-Use) race condition where two concurrent
+        // requests could both pass the "check if exists" step and create duplicate jobs
+        const jobResult = await prisma.$transaction(async (tx) => {
+            // Check for existing active job with FOR UPDATE SKIP LOCKED
+            // FOR UPDATE locks the rows for the duration of the transaction
+            // SKIP LOCKED prevents blocking on rows locked by other transactions
+            const existingJobs = await tx.$queryRaw<
+                Array<{
+                    id: string;
+                    status: string;
+                    subject: string;
+                    createdAt: Date;
+                }>
+            >`
+                SELECT id, status, subject, "createdAt"
+                FROM "DownloadJob"
+                WHERE "targetMbid" = ${mbid}
+                AND status IN ('pending', 'processing')
+                FOR UPDATE SKIP LOCKED
+            `;
+
+            if (existingJobs.length > 0) {
+                const existingJob = existingJobs[0];
+                logger.debug(
+                    `[DOWNLOAD] Job already exists for ${mbid}: ${existingJob.id} (${existingJob.status})`
+                );
+                return { duplicate: true, job: existingJob };
+            }
+
+            // No existing active job found, create new one
+            const newJob = await tx.downloadJob.create({
+                data: {
+                    userId,
+                    subject,
+                    type,
+                    targetMbid: mbid,
+                    status: "pending",
+                    metadata: {
+                        downloadType,
+                        rootFolderPath,
+                        artistName: verifiedArtistName,
+                        albumTitle,
+                    },
+                },
+            });
+
+            return { duplicate: false, job: newJob };
         });
 
-        if (existingJob) {
-            logger.debug(
-                `[DOWNLOAD] Job already exists for ${mbid}: ${existingJob.id} (${existingJob.status})`
-            );
+        // Handle duplicate case - return existing job info
+        if (jobResult.duplicate) {
             return res.json({
-                id: existingJob.id,
-                status: existingJob.status,
+                id: jobResult.job.id,
+                status: jobResult.job.status,
                 downloadType,
                 rootFolderPath,
                 message: "Download already in progress",
@@ -183,21 +223,7 @@ router.post("/", async (req, res) => {
             });
         }
 
-        const job = await prisma.downloadJob.create({
-            data: {
-                userId,
-                subject,
-                type,
-                targetMbid: mbid,
-                status: "pending",
-                metadata: {
-                    downloadType,
-                    rootFolderPath,
-                    artistName: verifiedArtistName,
-                    albumTitle,
-                },
-            },
-        });
+        const job = jobResult.job;
 
         logger.debug(
             `[DOWNLOAD] Triggering Lidarr: ${type} "${subject}" -> ${rootFolderPath}`
