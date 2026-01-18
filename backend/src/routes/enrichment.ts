@@ -613,6 +613,32 @@ router.post("/skip", requireAdmin, async (req, res) => {
 });
 
 /**
+ * DELETE /enrichment/failures
+ * Clear all unresolved failures (optionally filtered by type)
+ */
+router.delete("/failures", requireAdmin, async (req, res) => {
+    try {
+        const entityType = req.query.entityType as "artist" | "track" | "audio" | undefined;
+
+        if (entityType && !["artist", "track", "audio"].includes(entityType)) {
+            return res.status(400).json({ error: "Invalid entityType" });
+        }
+
+        const count = await enrichmentFailureService.clearAllFailures(entityType);
+
+        res.json({
+            message: `Cleared ${count} failure${count !== 1 ? "s" : ""}`,
+            count,
+        });
+    } catch (error: any) {
+        logger.error("Clear all failures error:", error);
+        res.status(500).json({
+            error: error.message || "Failed to clear failures",
+        });
+    }
+});
+
+/**
  * DELETE /enrichment/failures/:id
  * Delete a specific failure record
  */

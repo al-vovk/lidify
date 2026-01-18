@@ -245,6 +245,26 @@ class EnrichmentFailureService {
     }
 
     /**
+     * Clear all unresolved failures (optionally filtered by type)
+     */
+    async clearAllFailures(entityType?: "artist" | "track" | "audio"): Promise<number> {
+        const where: any = {
+            resolved: false,
+            skipped: false,
+        };
+
+        if (entityType) {
+            where.entityType = entityType;
+        }
+
+        const result = await prisma.enrichmentFailure.deleteMany({ where });
+
+        logger.info(`Cleared ${result.count} enrichment failures${entityType ? ` of type ${entityType}` : ""}`);
+
+        return result.count;
+    }
+
+    /**
      * Cleanup old resolved failures (older than specified days)
      */
     async cleanupOldResolved(olderThanDays: number = 30): Promise<number> {
