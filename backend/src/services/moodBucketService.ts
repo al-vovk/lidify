@@ -8,6 +8,7 @@
 
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
+import { shuffleArray } from "../utils/shuffle";
 
 // Mood configuration with scoring rules
 // Primary = uses ML mood predictions (enhanced mode)
@@ -446,7 +447,7 @@ export class MoodBucketService {
         }
 
         // Randomly sample from the pool
-        const shuffled = [...moodBuckets].sort(() => Math.random() - 0.5);
+        const shuffled = shuffleArray(moodBuckets);
         const selectedIds = shuffled.slice(0, limit).map((b) => b.trackId);
 
         // Get cover URLs for the selected tracks

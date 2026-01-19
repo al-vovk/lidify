@@ -28,6 +28,7 @@ function queueDebugEnabled(): boolean {
             window.localStorage?.getItem("lidifyQueueDebug") === "1"
         );
     } catch {
+        // Intentionally ignored: localStorage may throw in SSR or restricted contexts
         return false;
     }
 }

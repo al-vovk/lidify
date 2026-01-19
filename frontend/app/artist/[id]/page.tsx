@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useAudio } from "@/lib/audio-context";
+import { useAudioState, useAudioPlayback, useAudioControls } from "@/lib/audio-context";
 import { useDownloadContext } from "@/lib/download-context";
 import { LoadingScreen } from "@/components/ui/LoadingScreen";
 import { useImageColor } from "@/hooks/useImageColor";
@@ -25,7 +25,10 @@ import { SimilarArtists } from "@/features/artist/components/SimilarArtists";
 
 export default function ArtistPage() {
   const router = useRouter();
-  const { currentTrack, playTracks, isPlaying, pause } = useAudio();
+  // Use split hooks to avoid re-renders from currentTime updates
+  const { currentTrack } = useAudioState();
+  const { isPlaying } = useAudioPlayback();
+  const { playTracks, pause } = useAudioControls();
   const { isPendingByMbid } = useDownloadContext();
 
   // Data hook

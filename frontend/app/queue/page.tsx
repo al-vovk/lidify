@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { useAudio } from "@/lib/audio-context";
+import { useAudioState, useAudioControls } from "@/lib/audio-context";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/lib/toast-context";
 import { api } from "@/lib/api";
@@ -24,8 +24,8 @@ import {
 export default function QueuePage() {
     const router = useRouter();
     const { isAuthenticated } = useAuth();
-    const { queue, currentTrack, currentIndex, playTracks, removeFromQueue } =
-        useAudio();
+    const { queue, currentTrack, currentIndex } = useAudioState();
+    const { playTracks, removeFromQueue } = useAudioControls();
     const { toast } = useToast();
 
     useEffect(() => {

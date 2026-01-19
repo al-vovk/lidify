@@ -417,3 +417,51 @@ async function gracefulShutdown(signal: string) {
 // Handle termination signals
 process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+
+// Global error handlers to prevent silent crashes
+process.on("unhandledRejection", (reason, promise) => {
+    logger.error("Unhandled Promise Rejection:", {
+        reason: reason instanceof Error ? reason.message : String(reason),
+        stack: reason instanceof Error ? reason.stack : undefined,
+    });
+    // Don't exit - log and continue running
+    // This prevents silent crashes from unhandled promises
+});
+
+process.on("uncaughtException", (error) => {
+    logger.error("Uncaught Exception - initiating graceful shutdown:", {
+        message: error.message,
+        stack: error.stack,
+    });
+    // Attempt graceful shutdown for uncaught exceptions
+    gracefulShutdown("uncaughtException").catch(() => {
+        process.exit(1);
+    });
+});
+
+// Periodic health check to keep database connections alive and detect issues early
+// Runs every 5 minutes to prevent idle connection drops
+const HEALTH_CHECK_INTERVAL = 5 * 60 * 1000;
+setInterval(async () => {
+    try {
+        // Ping PostgreSQL
+        await prisma.$queryRaw`SELECT 1`;
+
+        // Ping Redis
+        if (redisClient.isReady) {
+            await redisClient.ping();
+        }
+    } catch (error) {
+        logger.error("Health check failed - connections may be stale:", {
+            error: error instanceof Error ? error.message : String(error),
+        });
+        // Attempt to reconnect Prisma
+        try {
+            await prisma.$disconnect();
+            await prisma.$connect();
+            logger.debug("Database connection recovered");
+        } catch (reconnectError) {
+            logger.error("Failed to recover database connection:", reconnectError);
+        }
+    }
+}, HEALTH_CHECK_INTERVAL);

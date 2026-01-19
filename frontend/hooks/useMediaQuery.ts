@@ -1,15 +1,43 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useSyncExternalStore } from "react";
 
+/**
+ * Hook to check if a media query matches
+ * Uses useSyncExternalStore for hydration-safe initial state
+ */
 export function useMediaQuery(query: string): boolean {
+    // Use useSyncExternalStore for hydration-safe media query detection
+    // This prevents the flash caused by useState(false) -> useEffect(true) pattern
+    const matches = useSyncExternalStore(
+        // Subscribe function
+        (callback) => {
+            if (typeof window === "undefined") return () => {};
+            const media = window.matchMedia(query);
+            media.addEventListener("change", callback);
+            return () => media.removeEventListener("change", callback);
+        },
+        // Get client snapshot
+        () => {
+            if (typeof window === "undefined") return false;
+            return window.matchMedia(query).matches;
+        },
+        // Get server snapshot (always false on server)
+        () => false
+    );
+
+    return matches;
+}
+
+/**
+ * Legacy implementation for reference - causes hydration flash
+ * @deprecated Use the useSyncExternalStore version above
+ */
+export function useMediaQueryLegacy(query: string): boolean {
     const [matches, setMatches] = useState(false);
 
     useEffect(() => {
-        // Only run on client side
         if (typeof window === "undefined") return;
 
         const media = window.matchMedia(query);
-
-        // Set initial value
         setMatches(media.matches);
 
         // Create listener

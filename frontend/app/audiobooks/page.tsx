@@ -8,7 +8,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { AudiobookCard } from "@/components/ui/AudiobookCard";
 import { api } from "@/lib/api";
-import { useAudio } from "@/lib/audio-context";
+import { useAudioState, useAudioControls } from "@/lib/audio-context";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/lib/toast-context";
 import { useAudiobooksQuery } from "@/hooks/useQueries";
@@ -17,6 +17,7 @@ import {
     ListTree,
     Shuffle,
 } from "lucide-react";
+import { shuffleArray } from "@/utils/shuffle";
 
 interface Audiobook {
     id: string;
@@ -47,7 +48,8 @@ export default function AudiobooksPage() {
     const router = useRouter();
     const { isAuthenticated } = useAuth();
     const { toast } = useToast();
-    const { currentAudiobook, pause } = useAudio();
+    const { currentAudiobook } = useAudioState();
+    const { pause } = useAudioControls();
 
     // Use React Query hook for audiobooks
     const { data: audiobooksData, isLoading, error } = useAudiobooksQuery();
@@ -233,7 +235,7 @@ export default function AudiobooksPage() {
             return;
         }
         // Shuffle the array
-        const shuffled = [...audiobooks].sort(() => Math.random() - 0.5);
+        const shuffled = shuffleArray(audiobooks);
         // Play the first one (audiobooks don't have a shuffle queue like tracks)
         if (shuffled[0]) {
             toast.success(`Playing random audiobook: ${shuffled[0].title}`);

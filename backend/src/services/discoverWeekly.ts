@@ -22,6 +22,7 @@ import { startOfWeek, subWeeks } from "date-fns";
 import { getSystemSettings } from "../utils/systemSettings";
 import { discoveryLogger } from "./discoveryLogger";
 import { acquisitionService } from "./acquisitionService";
+import { shuffleArray } from "../utils/shuffle";
 
 interface SeedArtist {
     name: string;
@@ -1154,7 +1155,7 @@ export class DiscoverWeeklyService {
         );
 
         // Shuffle the unique album tracks
-        const shuffled = onePerAlbum.sort(() => Math.random() - 0.5);
+        const shuffled = shuffleArray(onePerAlbum);
 
         // Step 1: Get ALL discovery tracks (1 per album) - no limit!
         let discoverySelected = [...shuffled];
@@ -1312,7 +1313,7 @@ export class DiscoverWeeklyService {
         let selected = [...discoverySelected, ...libraryAnchors];
 
         // Shuffle the final selection to mix anchors with discovery
-        selected = selected.sort(() => Math.random() - 0.5);
+        selected = shuffleArray(selected);
 
         await this.addBatchLog(
             batchId,
@@ -3192,11 +3193,9 @@ export class DiscoverWeeklyService {
         }
 
         // Shuffle each tier for variety week-to-week
-        const shuffle = <T>(arr: T[]): T[] =>
-            [...arr].sort(() => Math.random() - 0.5);
-        byTier.high = shuffle(byTier.high);
-        byTier.medium = shuffle(byTier.medium);
-        byTier.explore = shuffle(byTier.explore);
+        byTier.high = shuffleArray(byTier.high);
+        byTier.medium = shuffleArray(byTier.medium);
+        byTier.explore = shuffleArray(byTier.explore);
 
         // Helper to select from a tier
         const selectFromTier = async (
@@ -3286,7 +3285,7 @@ export class DiscoverWeeklyService {
                 ...byTier.explore,
             ].filter((a) => !seenArtists.has(a.name.toLowerCase()));
 
-            for (const artist of shuffle(allRemaining)) {
+            for (const artist of shuffleArray(allRemaining)) {
                 if (recommendations.length >= similarArtistTarget) break;
 
                 const key = artist.name.toLowerCase();
@@ -3349,7 +3348,7 @@ export class DiscoverWeeklyService {
                 ...byTier.explore,
             ].filter((a) => !seenArtists.has(a.name.toLowerCase()));
 
-            for (const artist of shuffle(allRemaining)) {
+            for (const artist of shuffleArray(allRemaining)) {
                 if (recommendations.length >= similarArtistTarget) break;
 
                 const key = artist.name.toLowerCase();

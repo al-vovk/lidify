@@ -39,6 +39,12 @@ export const queryKeys = {
 
     // Library queries
     library: () => ["library"] as const,
+    libraryArtists: (params: { filter?: string; sortBy?: string; limit?: number; offset?: number }) =>
+        ["library", "artists", params] as const,
+    libraryAlbums: (params: { filter?: string; sortBy?: string; limit?: number; offset?: number }) =>
+        ["library", "albums", params] as const,
+    libraryTracks: (params: { sortBy?: string; limit?: number; offset?: number }) =>
+        ["library", "tracks", params] as const,
     recentlyListened: (limit?: number) => ["library", "recently-listened", limit] as const,
     recentlyAdded: (limit?: number) => ["library", "recently-added", limit] as const,
 
@@ -280,6 +286,147 @@ export function useRecentlyAddedQuery(limit: number = 10) {
         queryKey: queryKeys.recentlyAdded(limit),
         queryFn: () => api.getRecentlyAdded(limit),
         staleTime: 2 * 60 * 1000, // 2 minutes
+    });
+}
+
+// ============================================================================
+// LIBRARY PAGE QUERIES (Artists/Albums/Tracks with pagination)
+// ============================================================================
+
+export type LibraryFilter = "owned" | "discovery" | "all";
+export type SortOption = "name" | "name-desc" | "recent" | "tracks";
+
+interface LibraryArtistsParams {
+    filter?: LibraryFilter;
+    sortBy?: SortOption;
+    limit?: number;
+    page?: number;
+}
+
+interface LibraryAlbumsParams {
+    filter?: LibraryFilter;
+    sortBy?: SortOption;
+    limit?: number;
+    page?: number;
+}
+
+interface LibraryTracksParams {
+    sortBy?: SortOption;
+    limit?: number;
+    page?: number;
+}
+
+/**
+ * Hook to fetch library artists with pagination and filtering
+ *
+ * Cache time: 2 minutes (may change as user adds music)
+ */
+export function useLibraryArtistsQuery({
+    filter = "owned",
+    sortBy = "name",
+    limit = 40,
+    page = 1,
+}: LibraryArtistsParams = {}) {
+    const offset = (page - 1) * limit;
+    return useQuery({
+        queryKey: queryKeys.libraryArtists({ filter, sortBy, limit, offset }),
+        queryFn: async () => {
+            const response = await api.getArtists({ limit, offset, filter });
+            const sortedArtists = [...response.artists].sort((a, b) => {
+                switch (sortBy) {
+                    case "name":
+                        return a.name.localeCompare(b.name);
+                    case "name-desc":
+                        return b.name.localeCompare(a.name);
+                    case "tracks":
+                        return (b.trackCount || 0) - (a.trackCount || 0);
+                    default:
+                        return 0;
+                }
+            });
+            return {
+                artists: sortedArtists,
+                total: response.total,
+                offset: response.offset,
+                limit: response.limit,
+            };
+        },
+        staleTime: 2 * 60 * 1000,
+    });
+}
+
+/**
+ * Hook to fetch library albums with pagination and filtering
+ *
+ * Cache time: 2 minutes (may change as user adds music)
+ */
+export function useLibraryAlbumsQuery({
+    filter = "owned",
+    sortBy = "name",
+    limit = 40,
+    page = 1,
+}: LibraryAlbumsParams = {}) {
+    const offset = (page - 1) * limit;
+    return useQuery({
+        queryKey: queryKeys.libraryAlbums({ filter, sortBy, limit, offset }),
+        queryFn: async () => {
+            const response = await api.getAlbums({ limit, offset, filter });
+            const sortedAlbums = [...response.albums].sort((a, b) => {
+                switch (sortBy) {
+                    case "name":
+                        return a.title.localeCompare(b.title);
+                    case "name-desc":
+                        return b.title.localeCompare(a.title);
+                    case "recent":
+                        return (b.year || 0) - (a.year || 0);
+                    default:
+                        return 0;
+                }
+            });
+            return {
+                albums: sortedAlbums,
+                total: response.total,
+                offset: response.offset,
+                limit: response.limit,
+            };
+        },
+        staleTime: 2 * 60 * 1000,
+    });
+}
+
+/**
+ * Hook to fetch library tracks with pagination
+ *
+ * Cache time: 2 minutes (may change as user adds music)
+ */
+export function useLibraryTracksQuery({
+    sortBy = "name",
+    limit = 40,
+    page = 1,
+}: LibraryTracksParams = {}) {
+    const offset = (page - 1) * limit;
+    return useQuery({
+        queryKey: queryKeys.libraryTracks({ sortBy, limit, offset }),
+        queryFn: async () => {
+            const response = await api.getTracks({ limit, offset });
+            const sortedTracks = [...response.tracks].sort((a, b) => {
+                switch (sortBy) {
+                    case "name":
+                        return a.title.localeCompare(b.title);
+                    case "name-desc":
+                        return b.title.localeCompare(a.title);
+                    default:
+                        return 0;
+                }
+            });
+            return {
+                tracks: sortedTracks,
+                total: response.total,
+                offset: response.offset,
+                limit: response.limit,
+            };
+        },
+        staleTime: 2 * 60 * 1000,
     });
 }
 

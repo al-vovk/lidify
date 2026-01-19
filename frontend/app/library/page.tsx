@@ -1,15 +1,19 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useAudio } from "@/lib/audio-context";
+import { useAudioState } from "@/lib/audio-state-context";
+import { useAudioControls } from "@/lib/audio-controls-context";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Tab, DeleteDialogState } from "@/features/library/types";
 import {
-    useLibraryData,
+    useLibraryArtistsQuery,
+    useLibraryAlbumsQuery,
+    useLibraryTracksQuery,
     LibraryFilter,
     SortOption,
-} from "@/features/library/hooks/useLibraryData";
+} from "@/hooks/useQueries";
+import { useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { useLibraryActions } from "@/features/library/hooks/useLibraryActions";
 import { LibraryHeader } from "@/features/library/components/LibraryHeader";
@@ -22,7 +26,8 @@ import { Shuffle, ListFilter } from "lucide-react";
 export default function LibraryPage() {
     const router = useRouter();
     const searchParams = useSearchParams();
-    const { currentTrack, playTracks } = useAudio();
+    const { currentTrack } = useAudioState();
+    const { playTracks } = useAudioControls();
 
     // Get active tab from URL params, default to "artists"
     const activeTab = (searchParams.get("tab") as Tab) || "artists";
@@ -44,15 +49,77 @@ export default function LibraryPage() {
         setCurrentPage(urlPage);
     }, [urlPage]);
 
-    // Use custom hooks with server-side pagination
-    const { artists, albums, tracks, isLoading, reloadData, pagination } =
-        useLibraryData({
-            activeTab,
-            filter,
-            sortBy,
-            itemsPerPage,
-            currentPage,
-        });
+    const queryClient = useQueryClient();
+
+    // Use React Query hooks for cached data fetching
+    const artistsQuery = useLibraryArtistsQuery({
+        filter,
+        sortBy,
+        limit: itemsPerPage,
+        page: currentPage,
+    });
+
+    const albumsQuery = useLibraryAlbumsQuery({
+        filter,
+        sortBy,
+        limit: itemsPerPage,
+        page: currentPage,
+    });
+
+    const tracksQuery = useLibraryTracksQuery({
+        sortBy,
+        limit: itemsPerPage,
+        page: currentPage,
+    });
+
+    // Get data based on active tab
+    const artists = useMemo(() => activeTab === "artists" ? (artistsQuery.data?.artists ?? []) : [], [activeTab, artistsQuery.data?.artists]);
+    const albums = useMemo(() => activeTab === "albums" ? (albumsQuery.data?.albums ?? []) : [], [activeTab, albumsQuery.data?.albums]);
+    const tracks = useMemo(() => activeTab === "tracks" ? (tracksQuery.data?.tracks ?? []) : [], [activeTab, tracksQuery.data?.tracks]);
+
+    // Loading state based on active tab
+    const isLoading =
+        (activeTab === "artists" && artistsQuery.isLoading) ||
+        (activeTab === "albums" && albumsQuery.isLoading) ||
+        (activeTab === "tracks" && tracksQuery.isLoading);
+
+    // Pagination from active query
+    const pagination = useMemo(() => ({
+        total:
+            activeTab === "artists"
+                ? (artistsQuery.data?.total ?? 0)
+                : activeTab === "albums"
+                ? (albumsQuery.data?.total ?? 0)
+                : (tracksQuery.data?.total ?? 0),
+        offset:
+            activeTab === "artists"
+                ? (artistsQuery.data?.offset ?? 0)
+                : activeTab === "albums"
+                ? (albumsQuery.data?.offset ?? 0)
+                : (tracksQuery.data?.offset ?? 0),
+        limit: itemsPerPage,
+        totalPages: Math.ceil(
+            (activeTab === "artists"
+                ? (artistsQuery.data?.total ?? 0)
+                : activeTab === "albums"
+                ? (albumsQuery.data?.total ?? 0)
+                : (tracksQuery.data?.total ?? 0)) / itemsPerPage
+        ),
+        currentPage,
+        itemsPerPage,
+    }), [activeTab, artistsQuery.data, albumsQuery.data, tracksQuery.data, itemsPerPage, currentPage]);
+
+    // Reload data function using React Query invalidation
+    const reloadData = useCallback(async () => {
+        if (activeTab === "artists") {
+            await queryClient.invalidateQueries({ queryKey: ["library", "artists"] });
+        } else if (activeTab === "albums") {
+            await queryClient.invalidateQueries({ queryKey: ["library", "albums"] });
+        } else {
+            await queryClient.invalidateQueries({ queryKey: ["library", "tracks"] });
+        }
+    }, [activeTab, queryClient]);
+
     const {
         playArtist,
         playAlbum,
@@ -90,21 +157,21 @@ export default function LibraryPage() {
     });
 
     // Change tab function
-    const changeTab = (tab: Tab) => {
+    const changeTab = useCallback((tab: Tab) => {
         router.push(`/library?tab=${tab}`, { scroll: false });
-    };
+    }, [router]);
 
     // Update page with URL state and scroll to top
-    const updatePage = (page: number) => {
+    const updatePage = useCallback((page: number) => {
         const params = new URLSearchParams();
         params.set("tab", activeTab);
         params.set("page", String(page));
         router.push(`/library?${params.toString()}`, { scroll: false });
         window.scrollTo({ top: 0, behavior: "smooth" });
-    };
+    }, [activeTab, router]);
 
     // Helper to convert library Track to audio context Track format
-    const formatTracksForAudio = (libraryTracks: typeof tracks) => {
+    const formatTracksForAudio = useCallback((libraryTracks: typeof tracks) => {
         return libraryTracks.map((track) => ({
             id: track.id,
             title: track.title,
@@ -119,19 +186,19 @@ export default function LibraryPage() {
                 coverArt: track.album?.coverArt,
             },
         }));
-    };
+    }, []);
 
     // Wrapper for playTracks that converts track format
-    const handlePlayTracks = (
+    const handlePlayTracks = useCallback((
         libraryTracks: typeof tracks,
         startIndex?: number
     ) => {
         const formattedTracks = formatTracksForAudio(libraryTracks);
         playTracks(formattedTracks, startIndex);
-    };
+    }, [formatTracksForAudio, playTracks]);
 
     // Shuffle entire library - uses server-side shuffle for large libraries
-    const handleShuffleLibrary = async () => {
+    const handleShuffleLibrary = useCallback(async () => {
         try {
             // Use server-side shuffle endpoint for better performance with large libraries
             const { tracks: shuffledTracks } = await api.getShuffledTracks(500);
@@ -145,10 +212,10 @@ export default function LibraryPage() {
         } catch (error) {
             console.error("Failed to shuffle library:", error);
         }
-    };
+    }, [formatTracksForAudio, playTracks]);
 
     // Handle delete confirmation
-    const handleDelete = async () => {
+    const handleDelete = useCallback(async () => {
         try {
             switch (deleteConfirm.type) {
                 case "artist":
@@ -174,7 +241,7 @@ export default function LibraryPage() {
             console.error(`Failed to delete ${deleteConfirm.type}:`, error);
             // Keep dialog open on error so user can retry
         }
-    };
+    }, [deleteConfirm, deleteArtist, deleteAlbum, deleteTrack, reloadData]);
 
     return (
         <div className="min-h-screen relative">

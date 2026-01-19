@@ -4,10 +4,11 @@ import { useState, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Image from "next/image";
 import { api } from "@/lib/api";
-import { useAudio } from "@/lib/audio-context";
+import { useAudioState, useAudioPlayback, useAudioControls } from "@/lib/audio-context";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { Play, Pause, Music, Shuffle, Save, ListPlus } from "lucide-react";
 import { cn } from "@/utils/cn";
+import { shuffleArray } from "@/utils/shuffle";
 import { toast } from "sonner";
 import { useMixQuery } from "@/hooks/useQueries";
 
@@ -30,7 +31,10 @@ export default function MixPage() {
     const params = useParams();
     const router = useRouter();
     const mixId = params.id as string;
-    const { playTracks, addToQueue, currentTrack, isPlaying, pause, resume } = useAudio();
+    // Use split hooks to avoid re-renders from currentTime updates
+    const { currentTrack } = useAudioState();
+    const { isPlaying } = useAudioPlayback();
+    const { playTracks, addToQueue, pause, resume } = useAudioControls();
 
     const { data: mix, isLoading } = useMixQuery(mixId);
     const [isSaving, setIsSaving] = useState(false);
@@ -109,7 +113,7 @@ export default function MixPage() {
     const handleShuffle = () => {
         if (!mix?.tracks) return;
         const tracks = formatTracksForPlayback(mix.tracks);
-        const shuffled = [...tracks].sort(() => Math.random() - 0.5);
+        const shuffled = shuffleArray(tracks);
         playTracks(shuffled, 0);
     };
 

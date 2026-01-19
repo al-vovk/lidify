@@ -284,21 +284,15 @@ class ApiClient {
                 _retryCount === 0 &&
                 endpoint !== "/auth/refresh"
             ) {
-                console.log("[API] 401 error - attempting token refresh");
                 const refreshed = await this.refreshAccessToken();
 
                 if (refreshed) {
-                    console.log("[API] Token refreshed - retrying request");
                     // Retry the request with new token
                     return this.request<T>(endpoint, {
                         ...options,
                         _retryCount: 1, // Prevent infinite loops
                     });
                 }
-
-                console.log(
-                    "[API] Token refresh failed - user needs to re-login"
-                );
             }
 
             if (response.status === 401) {

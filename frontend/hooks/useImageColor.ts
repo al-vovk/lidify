@@ -302,15 +302,16 @@ export function useImageColor(imageUrl: string | null | undefined) {
             // Ignore cache read errors
         }
 
+        let cancelled = false;
         setIsLoading(true);
 
-        // Extract colors client-side using canvas
         extractColorsFromImage(imageUrl)
             .then((palette: ColorPalette) => {
+                if (cancelled) return;
+
                 setColors(palette);
                 setIsLoading(false);
 
-                // Cache the result in localStorage
                 try {
                     localStorage.setItem(cacheKey, JSON.stringify(palette));
                 } catch (error) {
@@ -318,9 +319,10 @@ export function useImageColor(imageUrl: string | null | undefined) {
                 }
             })
             .catch((error) => {
+                if (cancelled) return;
+
                 console.error("[useImageColor] Failed to extract colors:", error.message || error);
 
-                // Use fallback colors on error
                 setColors({
                     vibrant: "#1db954",
                     darkVibrant: "#121212",
@@ -331,13 +333,16 @@ export function useImageColor(imageUrl: string | null | undefined) {
                 });
                 setIsLoading(false);
 
-                // Remove any cached failures so it can retry later
                 try {
                     localStorage.removeItem(cacheKey);
                 } catch (e) {
                     // Ignore
                 }
             });
+
+        return () => {
+            cancelled = true;
+        };
     }, [imageUrl]);
 
     return { colors, isLoading };

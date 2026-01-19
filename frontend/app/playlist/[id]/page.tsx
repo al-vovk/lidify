@@ -5,8 +5,9 @@ import { useParams, useRouter } from "next/navigation";
 import Image from "next/image";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { api } from "@/lib/api";
-import { useAudio } from "@/lib/audio-context";
+import { useAudioState, useAudioPlayback, useAudioControls, Track as AudioTrack } from "@/lib/audio-context";
 import { cn } from "@/utils/cn";
+import { shuffleArray } from "@/utils/shuffle";
 import { usePlaylistQuery } from "@/hooks/useQueries";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/lib/toast-context";
@@ -69,8 +70,10 @@ export default function PlaylistDetailPage() {
     const router = useRouter();
     const queryClient = useQueryClient();
     const { toast } = useToast();
-    const { playTracks, addToQueue, currentTrack, isPlaying, pause, resume } =
-        useAudio();
+    // Use split hooks to avoid re-renders from currentTime updates
+    const { currentTrack } = useAudioState();
+    const { isPlaying } = useAudioPlayback();
+    const { playTracks, addToQueue, pause, resume } = useAudioControls();
     const playlistId = params.id as string;
 
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -492,7 +495,7 @@ export default function PlaylistDetailPage() {
                                     playlist.items.length === 0
                                 )
                                     return;
-                                const tracks = playlist.items.map(
+                                const tracks: AudioTrack[] = playlist.items.map(
                                     (item: PlaylistItem) => ({
                                         id: item.track.id,
                                         title: item.track.title,
@@ -509,9 +512,7 @@ export default function PlaylistDetailPage() {
                                     })
                                 );
                                 // Shuffle the tracks
-                                const shuffled = [...tracks].sort(
-                                    () => Math.random() - 0.5
-                                );
+                                const shuffled = shuffleArray(tracks);
                                 playTracks(shuffled, 0);
                             }}
                             className="h-8 w-8 rounded-full hover:bg-white/10 flex items-center justify-center text-white/60 hover:text-white transition-all"

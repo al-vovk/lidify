@@ -66,11 +66,13 @@ const PlayableCard = memo(function PlayableCard({
                 onMouseEnter={() => setIsHovered(true)}
                 onMouseLeave={() => setIsHovered(false)}
             >
-                <div className={cn(
-                    "relative w-full h-full bg-[#282828] flex items-center justify-center overflow-hidden shadow-lg",
-                    circular ? "rounded-full" : "rounded-md"
-                )}>
-                    {coverArt ? (
+                <div
+                    className={cn(
+                        "relative w-full h-full bg-[#282828] flex items-center justify-center overflow-hidden shadow-lg",
+                        circular ? "rounded-full" : "rounded-md",
+                    )}
+                >
+                    {coverArt ?
                         <Image
                             src={coverArt}
                             alt={title}
@@ -78,15 +80,14 @@ const PlayableCard = memo(function PlayableCard({
                             sizes="(max-width: 640px) 50vw, (max-width: 768px) 33vw, (max-width: 1024px) 25vw, (max-width: 1280px) 20vw, 16vw"
                             className={cn(
                                 "object-cover transition-transform duration-300",
-                                isHovered && "scale-105"
+                                isHovered && "scale-105",
                             )}
                             unoptimized
                         />
-                    ) : (
-                        placeholderIcon || (
+                    :   placeholderIcon || (
                             <div className="w-12 h-12 bg-[#3e3e3e] rounded-full" />
                         )
-                    )}
+                    }
                 </div>
 
                 {/* Play Button */}
@@ -102,16 +103,15 @@ const PlayableCard = memo(function PlayableCard({
                             "absolute bottom-2 right-2 w-10 h-10 rounded-full flex items-center justify-center",
                             "shadow-xl shadow-black/50 transition-all duration-200",
                             "hover:scale-105 hover:brightness-110",
-                            isHovered || isPlaying
-                                ? "opacity-100 translate-y-0"
-                                : "opacity-0 translate-y-2"
+                            isHovered || isPlaying ?
+                                "opacity-100 translate-y-0"
+                            :   "opacity-0 translate-y-2",
                         )}
                     >
-                        {isPlaying ? (
+                        {isPlaying ?
                             <Pause className="w-4 h-4 fill-current text-black" />
-                        ) : (
-                            <Play className="w-4 h-4 fill-current ml-0.5 text-black" />
-                        )}
+                        :   <Play className="w-4 h-4 fill-current ml-0.5 text-black" />
+                        }
                     </button>
                 )}
             </div>
@@ -141,20 +141,20 @@ const PlayableCard = memo(function PlayableCard({
                             disabled={isDownloading}
                             className={cn(
                                 "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium transition-all",
-                                isDownloading
-                                    ? "bg-gray-500/20 border border-gray-500/30 text-gray-500 cursor-not-allowed"
-                                    : "bg-yellow-500/20 hover:bg-yellow-500/30 border border-yellow-500/30 hover:border-yellow-500/50 text-yellow-400 hover:text-yellow-300"
+                                isDownloading ?
+                                    "bg-gray-500/20 border border-gray-500/30 text-gray-500 cursor-not-allowed"
+                                :   "bg-yellow-500/20 hover:bg-yellow-500/30 border border-yellow-500/30 hover:border-yellow-500/50 text-yellow-400 hover:text-yellow-300",
                             )}
                             title={
-                                isDownloading
-                                    ? "Downloading..."
-                                    : "Download Album"
+                                isDownloading ? "Downloading..." : (
+                                    "Download Album"
+                                )
                             }
                         >
                             <Download
                                 className={cn(
                                     "w-3 h-3",
-                                    isDownloading && "animate-pulse"
+                                    isDownloading && "animate-pulse",
                                 )}
                             />
                             {isDownloading ? "Downloading..." : "Download"}
@@ -168,7 +168,9 @@ const PlayableCard = memo(function PlayableCard({
                 {title}
             </h3>
             {subtitle && (
-                <p className="text-xs text-gray-400 truncate mt-0.5">{subtitle}</p>
+                <p className="text-xs text-gray-400 truncate mt-0.5">
+                    {subtitle}
+                </p>
             )}
         </>
     );
@@ -176,19 +178,18 @@ const PlayableCard = memo(function PlayableCard({
     const cardClassName = cn("group cursor-pointer", className);
 
     // TV navigation attributes
-    const tvNavProps = tvCardIndex !== undefined ? {
-        "data-tv-card": true,
-        "data-tv-card-index": tvCardIndex,
-        tabIndex: 0
-    } : {};
+    const tvNavProps =
+        tvCardIndex !== undefined ?
+            {
+                "data-tv-card": true,
+                "data-tv-card-index": tvCardIndex,
+                tabIndex: 0,
+            }
+        :   {};
 
     if (href) {
         return (
-            <Link
-                href={href}
-                onClick={handleLinkClick}
-                {...tvNavProps}
-            >
+            <Link href={href} onClick={handleLinkClick} {...tvNavProps}>
                 <Card variant={variant} className={cardClassName} {...props}>
                     {cardContent}
                 </Card>

@@ -1,15 +1,16 @@
 import { api } from "@/lib/api";
-import { useAudio } from "@/lib/audio-context";
+import { useAudioControls } from "@/lib/audio-context";
 import { useDownloadContext } from "@/lib/download-context";
 import { toast } from "sonner";
 import { Album, Track } from "../types";
 
 export function useAlbumActions() {
+    // Use controls-only hook to avoid re-renders from playback state changes
     const {
         playTracks,
         playTrack: playTrackAudio,
         addToQueue: addToQueueAudio,
-    } = useAudio();
+    } = useAudioControls();
     const { addPendingDownload, isPendingByMbid } = useDownloadContext();
 
     const playAlbum = (album: Album | null, startIndex: number = 0) => {

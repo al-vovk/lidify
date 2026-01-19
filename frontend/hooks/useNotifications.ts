@@ -157,7 +157,7 @@ export function useDownloadHistory() {
     } = useQuery<DownloadHistoryItem[]>({
         queryKey: ["download-history"],
         queryFn: fetchHistory,
-        refetchInterval: 10000,
+        refetchInterval: 30000, // 30s - history doesn't need frequent updates
     });
 
     const queryClient = useQueryClient();
@@ -207,7 +207,9 @@ export function useDownloadHistory() {
 }
 
 /**
- * Hook for active downloads - unchanged from original
+ * Hook for active downloads with adaptive polling
+ * - Polls every 10s when downloads are active (for progress updates)
+ * - Polls every 30s when idle (to catch new downloads)
  */
 export function useActiveDownloads() {
     const fetchDownloads = useCallback(async () => {
@@ -222,7 +224,11 @@ export function useActiveDownloads() {
     } = useQuery<DownloadHistoryItem[]>({
         queryKey: ["active-downloads"],
         queryFn: fetchDownloads,
-        refetchInterval: 3000,
+        // Adaptive polling: 10s when active, 30s when idle
+        refetchInterval: (query) => {
+            const data = query.state.data;
+            return data && data.length > 0 ? 10000 : 30000;
+        },
     });
 
     return {

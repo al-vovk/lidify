@@ -32,6 +32,7 @@ import {
     getDecadeWhereClause,
     getDecadeFromYear,
 } from "../utils/dateFilters";
+import { shuffleArray } from "../utils/shuffle";
 
 const router = Router();
 
@@ -3571,14 +3572,14 @@ router.get("/radio", async (req, res) => {
                     similarTracks.length
                 );
 
-                const selectedOriginal = artistTracks
-                    .sort(() => Math.random() - 0.5)
-                    .slice(0, originalCount);
+                const selectedOriginal = shuffleArray(artistTracks).slice(
+                    0,
+                    originalCount
+                );
                 // Take top vibe-matched tracks (already sorted by vibe score), then shuffle slightly
-                const selectedSimilar = similarTracks
-                    .slice(0, similarCount * 2)
-                    .sort(() => Math.random() - 0.3) // Slight shuffle to add variety
-                    .slice(0, similarCount);
+                const selectedSimilar = shuffleArray(
+                    similarTracks.slice(0, similarCount * 2)
+                ).slice(0, similarCount);
 
                 trackIds = [...selectedOriginal, ...selectedSimilar].map(
                     (t) => t.id
@@ -4131,7 +4132,7 @@ router.get("/radio", async (req, res) => {
         const finalIds =
             type === "vibe"
                 ? trackIds.slice(0, limitNum) // Already sorted by match score
-                : trackIds.sort(() => Math.random() - 0.5).slice(0, limitNum);
+                : shuffleArray(trackIds).slice(0, limitNum);
 
         if (finalIds.length === 0) {
             return res.json({ tracks: [] });
@@ -4355,9 +4356,7 @@ router.get("/radio", async (req, res) => {
 
         // For vibe mode, keep sorted order. For other modes, shuffle.
         const finalTracks =
-            type === "vibe"
-                ? transformedTracks
-                : transformedTracks.sort(() => Math.random() - 0.5);
+            type === "vibe" ? transformedTracks : shuffleArray(transformedTracks);
 
         // Include source features if this was a vibe request
         const response: any = { tracks: finalTracks };

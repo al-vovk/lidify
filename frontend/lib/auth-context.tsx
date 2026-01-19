@@ -6,6 +6,8 @@ import {
     useEffect,
     useState,
     ReactNode,
+    useMemo,
+    useCallback,
 } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { api } from "./api";
@@ -97,7 +99,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                             return;
                         }
                     } catch {
-                        // If status check fails, assume users exist
+                        // Intentionally ignored: if onboarding status check fails, assume users exist and proceed to login
                     }
                     // Users exist but not logged in - redirect to login
                     router.push("/login");
@@ -111,7 +113,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []); // Only run once on mount
 
-    const login = async (
+    const login = useCallback(async (
         username: string,
         password: string,
         token?: string
@@ -139,19 +141,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             // Re-throw the error so the login page can handle it
             throw error;
         }
-    };
+    }, [router]);
 
-    const logout = async () => {
+    const logout = useCallback(async () => {
         await api.logout();
         setIsAuthenticated(false);
         setUser(null);
         router.push("/login");
-    };
+    }, [router]);
+
+    // Memoize context value to prevent unnecessary re-renders
+    const contextValue = useMemo(() => ({
+        isAuthenticated,
+        isLoading,
+        user,
+        login,
+        logout,
+    }), [isAuthenticated, isLoading, user, login, logout]);
 
     return (
-        <AuthContext.Provider
-            value={{ isAuthenticated, isLoading, user, login, logout }}
-        >
+        <AuthContext.Provider value={contextValue}>
             {children}
         </AuthContext.Provider>
     );

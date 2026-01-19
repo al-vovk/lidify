@@ -5,6 +5,7 @@ import { PlayableCard } from "@/components/ui/PlayableCard";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { api } from "@/lib/api";
+import { VirtuosoGrid } from "react-virtuoso";
 
 interface ArtistsGridProps {
     artists: Artist[];
@@ -34,7 +35,7 @@ const ArtistCardItem = memo(
     }: ArtistCardItemProps) {
         const handlePlay = useCallback(
             () => onPlay(artist.id),
-            [artist.id, onPlay]
+            [artist.id, onPlay],
         );
         const handleDelete = useCallback(
             (e: React.MouseEvent) => {
@@ -42,11 +43,11 @@ const ArtistCardItem = memo(
                 e.stopPropagation();
                 onDelete(artist.id, artist.name);
             },
-            [artist.id, artist.name, onDelete]
+            [artist.id, artist.name, onDelete],
         );
 
         return (
-            <div className="relative group">
+            <div className="relative group h-full">
                 <PlayableCard
                     href={`/artist/${artist.mbid || artist.id}`}
                     coverArt={getArtistImageSrc(artist.coverArt)}
@@ -74,7 +75,7 @@ const ArtistCardItem = memo(
     },
     (prevProps, nextProps) => {
         return prevProps.artist.id === nextProps.artist.id;
-    }
+    },
 );
 
 const ArtistsGrid = memo(function ArtistsGrid({
@@ -102,19 +103,20 @@ const ArtistsGrid = memo(function ArtistsGrid({
     }
 
     return (
-        <div
-            data-tv-section="library-artists"
-            className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-4"
-        >
-            {artists.map((artist, index) => (
-                <ArtistCardItem
-                    key={artist.id}
-                    artist={artist}
-                    index={index}
-                    onPlay={onPlay}
-                    onDelete={onDelete}
-                />
-            ))}
+        <div data-tv-section="library-artists" className="h-full min-h-[400px]">
+            <VirtuosoGrid
+                useWindowScroll
+                data={artists}
+                listClassName="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-4"
+                itemContent={(index, artist) => (
+                    <ArtistCardItem
+                        artist={artist}
+                        index={index}
+                        onPlay={onPlay}
+                        onDelete={onDelete}
+                    />
+                )}
+            />
         </div>
     );
 });

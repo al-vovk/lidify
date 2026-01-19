@@ -1,10 +1,12 @@
 import { useCallback } from 'react';
 import { api } from '@/lib/api';
-import { useAudio } from '@/lib/audio-context';
+import { useAudioControls } from '@/lib/audio-context';
 import { Artist, Album, Track } from '../types';
+import { shuffleArray } from '@/utils/shuffle';
 
 export function useArtistActions() {
-  const { playTrack: playTrackFromContext, playTracks } = useAudio();
+  // Use controls-only hook to avoid re-renders from playback state changes
+  const { playTrack: playTrackFromContext, playTracks } = useAudioControls();
 
   // Helper to load all tracks from owned albums
   const loadAllOwnedTracks = async (artist: Artist, albums: Album[]) => {
@@ -89,7 +91,7 @@ export function useArtistActions() {
         }
 
         // Shuffle all tracks randomly
-        const shuffledTracks = [...allTracks].sort(() => Math.random() - 0.5);
+        const shuffledTracks = shuffleArray(allTracks);
 
         playTracks(shuffledTracks);
       } catch (error) {

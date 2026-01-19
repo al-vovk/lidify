@@ -30,6 +30,12 @@ export function useTVNavigation(options: UseTVNavigationOptions = {}): UseTVNavi
     // Focus memory: remember last focused card index per section
     const focusMemory = useRef<Map<number, number>>(new Map());
 
+    // Store latest callbacks in refs to avoid stale closures
+    const onBackRef = useRef(onBack);
+    onBackRef.current = onBack;
+    const onSelectRef = useRef(onSelect);
+    onSelectRef.current = onSelect;
+
     // Get all sections with data-tv-section attribute
     const getSections = useCallback(() => {
         if (!containerRef.current) return [];
@@ -116,7 +122,7 @@ export function useTVNavigation(options: UseTVNavigationOptions = {}): UseTVNavi
                 prev?.focus();
             } else if (e.key === DPAD_KEYS.UP || e.key === 'ArrowUp') {
                 e.preventDefault();
-                onBack?.();
+                onBackRef.current?.();
                 setIsContentFocused(false);
             }
             return;
@@ -202,7 +208,7 @@ export function useTVNavigation(options: UseTVNavigationOptions = {}): UseTVNavi
                     }
                 } else {
                     // At top section, trigger onBack to return to nav
-                    onBack?.();
+                    onBackRef.current?.();
                     setIsContentFocused(false);
                 }
                 break;
@@ -217,7 +223,7 @@ export function useTVNavigation(options: UseTVNavigationOptions = {}): UseTVNavi
                         return; // Allow default navigation
                     }
                     // Otherwise trigger onSelect
-                    onSelect?.(focusedElement);
+                    onSelectRef.current?.(focusedElement);
                 }
                 break;
             }
@@ -225,14 +231,14 @@ export function useTVNavigation(options: UseTVNavigationOptions = {}): UseTVNavi
             case DPAD_KEYS.BACK:
             case 'Escape': {
                 e.preventDefault();
-                onBack?.();
+                onBackRef.current?.();
                 setIsContentFocused(false);
                 break;
             }
         }
     }, [
         enabled, isTV, isContentFocused, focusedSectionIndex, focusedCardIndex,
-        getSections, getCardsInSection, focusCard, onBack, onSelect
+        getSections, getCardsInSection, focusCard
     ]);
 
     // Track when content receives focus from outside

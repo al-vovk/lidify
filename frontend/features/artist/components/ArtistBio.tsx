@@ -1,3 +1,5 @@
+import DOMPurify from "dompurify";
+
 interface ArtistBioProps {
   bio: string;
 }
@@ -12,7 +14,7 @@ export function ArtistBio({ bio }: ArtistBioProps) {
         <div
           className="prose prose-sm md:prose-base prose-invert max-w-none leading-relaxed [&_a]:text-[#ecb200] [&_a]:no-underline [&_a:hover]:underline"
           style={{ color: '#b3b3b3' }}
-          dangerouslySetInnerHTML={{ __html: bio }}
+          dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(bio || "") }}
         />
       </div>
     </section>

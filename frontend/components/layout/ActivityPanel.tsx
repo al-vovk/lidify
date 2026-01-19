@@ -141,19 +141,27 @@ export function ActivityPanel({
         );
     }
 
-    // Desktop: Side panel
+    // Desktop: Side panel - uses transform instead of width for GPU-accelerated animation
     return (
         <div
-            className={cn(
-                "shrink-0 h-full bg-[#0d0d0d] rounded-tl-lg rounded-bl-lg border-l border-white/5 flex flex-col z-10 transition-all duration-300 ease-out overflow-hidden relative",
-                isOpen ? "w-[400px]" : "w-12"
-            )}
+            className="shrink-0 h-full relative z-10"
+            style={{ width: isOpen ? 400 : 48 }}
         >
-            {/* Collapsed state overlay */}
-            {!isOpen && (
+            {/* Panel container - slides via transform (GPU-accelerated, no layout recalc) */}
+            <div
+                className="absolute inset-y-0 right-0 w-[400px] bg-[#0d0d0d] rounded-tl-lg rounded-bl-lg border-l border-white/5 flex flex-col overflow-hidden transition-transform duration-200 ease-out"
+                style={{
+                    transform: isOpen ? 'translateX(0)' : 'translateX(352px)',
+                    willChange: 'transform',
+                }}
+            >
+                {/* Collapsed state overlay - clickable strip on left */}
                 <div
                     onClick={onToggle}
-                    className="absolute inset-0 flex items-center justify-center cursor-pointer hover:bg-[#141414] transition-colors"
+                    className={cn(
+                        "absolute left-0 top-0 bottom-0 w-12 flex items-center justify-center cursor-pointer hover:bg-[#141414] transition-colors z-10",
+                        isOpen && "pointer-events-none opacity-0"
+                    )}
                     title="Open activity panel"
                 >
                     <ChevronLeft className="w-5 h-5 text-white/40" />
@@ -163,15 +171,14 @@ export function ActivityPanel({
                         <span className="absolute top-4 right-3 w-2.5 h-2.5 rounded-full bg-[#ecb200]" />
                     )}
                 </div>
-            )}
 
-            {/* Expanded content - only visible when open */}
-            <div
-                className={cn(
-                    "flex flex-col h-full transition-opacity duration-200",
-                    isOpen ? "opacity-100" : "opacity-0 pointer-events-none"
-                )}
-            >
+                {/* Expanded content */}
+                <div
+                    className={cn(
+                        "flex flex-col h-full transition-opacity duration-150",
+                        isOpen ? "opacity-100" : "opacity-0 pointer-events-none"
+                    )}
+                >
                 {/* Header */}
                 <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
                     <h2 className="text-base font-semibold text-white whitespace-nowrap">
@@ -234,6 +241,7 @@ export function ActivityPanel({
                     )}
                     {resolvedActiveTab === "active" && <ActiveDownloadsTab />}
                     {resolvedActiveTab === "history" && <HistoryTab />}
+                </div>
                 </div>
             </div>
         </div>

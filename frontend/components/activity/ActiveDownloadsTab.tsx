@@ -1,47 +1,23 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Download, Loader2, Music, Disc, X, Trash2 } from "lucide-react";
+import { useState } from "react";
+import { Download, Loader2, Music, Disc, X } from "lucide-react";
 import { api } from "@/lib/api";
 import { cn } from "@/utils/cn";
 import { GradientSpinner } from "../ui/GradientSpinner";
-
-interface ActiveDownload {
-    id: string;
-    subject: string;
-    type: string;
-    status: string;
-    createdAt: string;
-    metadata?: {
-        statusText?: string;
-        currentSource?: "lidarr" | "soulseek";
-        lidarrAttempts?: number;
-        soulseekAttempts?: number;
-    };
-}
+import { useActiveDownloads } from "@/hooks/useNotifications";
 
 export function ActiveDownloadsTab() {
-    const [downloads, setDownloads] = useState<ActiveDownload[]>([]);
-    const [loading, setLoading] = useState(true);
+    // Use shared React Query hook instead of duplicate polling
+    const { downloads, isLoading: loading, refetch } = useActiveDownloads();
     const [cancelling, setCancelling] = useState<Set<string>>(new Set());
-
-    const fetchDownloads = async () => {
-        try {
-            const data = await api.getActiveDownloads();
-            setDownloads(data);
-        } catch (error) {
-            console.error("Failed to fetch active downloads:", error);
-        } finally {
-            setLoading(false);
-        }
-    };
 
     const handleCancel = async (id: string) => {
         setCancelling((prev) => new Set(prev).add(id));
         try {
             await api.deleteDownload(id);
-            // Optimistically remove from list
-            setDownloads((prev) => prev.filter((d) => d.id !== id));
+            // Refetch to get updated list
+            refetch();
         } catch (error) {
             console.error("Failed to cancel download:", error);
         } finally {
@@ -59,23 +35,14 @@ export function ActiveDownloadsTab() {
         try {
             // Cancel all downloads in parallel
             await Promise.all(ids.map((id) => api.deleteDownload(id)));
-            setDownloads([]);
+            refetch();
         } catch (error) {
             console.error("Failed to cancel all downloads:", error);
-            // Refresh to get actual state
-            fetchDownloads();
+            refetch();
         } finally {
             setCancelling(new Set());
         }
     };
-
-    useEffect(() => {
-        fetchDownloads();
-
-        // Poll for updates every 5 seconds
-        const interval = setInterval(fetchDownloads, 5000);
-        return () => clearInterval(interval);
-    }, []);
 
     const formatTime = (dateStr: string) => {
         const date = new Date(dateStr);
@@ -175,7 +142,7 @@ export function ActiveDownloadsTab() {
                                                         : "text-teal-400"
                                                 )}
                                             >
-                                                {download.metadata.statusText}
+                                                {String(download.metadata.statusText)}
                                             </span>
                                         </>
                                     )}

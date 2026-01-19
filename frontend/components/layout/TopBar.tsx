@@ -58,6 +58,7 @@ export function TopBar() {
     // Only use API-driven state for the icon
     // pendingDownloads is optimistic local state that can become stale
     const hasActiveDownloads = downloadStatus.hasActiveDownloads;
+
     const hasPendingUploads =
         pendingDownloads.length > 0 &&
         pendingDownloads.some((p) => Date.now() - p.timestamp < 30000); // Only count recent pending
@@ -246,7 +247,7 @@ export function TopBar() {
                                 className="group-hover:scale-105 transition-transform"
                             />
                         </Link>
-                        <span className="ml-2 px-1.5 py-0.5 text-[8px] font-medium text-white/40 bg-white/5 rounded border border-white/10 -mt-2.5">
+                        <span className="ml-2 px-1.5 py-0.5 text-[8px] font-medium text-white/40 bg-white/5 rounded border border-white/10 -mt-3">
                             v{APP_VERSION}
                         </span>
                     </div>

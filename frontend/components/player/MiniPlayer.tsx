@@ -555,7 +555,7 @@ export function MiniPlayer() {
                 </button>
             )}
 
-            <div className="bg-gradient-to-t from-[#0a0a0a] via-[#0f0f0f] to-[#0a0a0a] border-t border-white/[0.08] relative backdrop-blur-xl">
+            <div className="bg-gradient-to-t from-[#080808] via-[#0c0c0c] to-[#0a0a0a] border-t border-white/[0.08] relative">
                 {/* Subtle top glow */}
                 <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
 

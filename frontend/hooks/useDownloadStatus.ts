@@ -92,6 +92,8 @@ export function useDownloadStatus(
                     failedDownloads,
                 });
 
+                if (!mounted) return;
+
                 // Continue polling if there are active downloads
                 if (activeDownloads.length > 0) {
                     // Poll faster when downloads are active (5 seconds)
@@ -136,7 +138,9 @@ export function useDownloadStatus(
 
         // Listen for download status changes (e.g., when user clears history)
         const handleDownloadStatusChanged = () => {
-            pollDownloads();
+            if (mounted) {
+                pollDownloads();
+            }
         };
         window.addEventListener(
             "download-status-changed",

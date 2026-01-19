@@ -8,7 +8,7 @@ import { usePlaylistsQuery } from "@/hooks/useQueries";
 import { useQueryClient } from "@tanstack/react-query";
 import { queryKeys } from "@/hooks/useQueries";
 import { useAuth } from "@/lib/auth-context";
-import { useAudio } from "@/lib/audio-context";
+import { useAudioControls } from "@/lib/audio-context";
 import { Play, Music, Eye, EyeOff } from "lucide-react";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { api } from "@/lib/api";
@@ -242,7 +242,7 @@ function PlaylistCard({
 export default function PlaylistsPage() {
     const router = useRouter();
     const { isAuthenticated } = useAuth();
-    const { playTracks } = useAudio();
+    const { playTracks } = useAudioControls();
     const queryClient = useQueryClient();
     const [showHiddenTab, setShowHiddenTab] = useState(false);
 

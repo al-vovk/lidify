@@ -5,6 +5,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { Disc3, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
+import { VirtuosoGrid } from "react-virtuoso";
 
 interface AlbumsGridProps {
     albums: Album[];
@@ -29,7 +30,7 @@ const AlbumCardItem = memo(
     }: AlbumCardItemProps) {
         const handlePlay = useCallback(
             () => onPlay(album.id),
-            [album.id, onPlay]
+            [album.id, onPlay],
         );
         const handleDelete = useCallback(
             (e: React.MouseEvent) => {
@@ -37,17 +38,17 @@ const AlbumCardItem = memo(
                 e.stopPropagation();
                 onDelete(album.id, album.title);
             },
-            [album.id, album.title, onDelete]
+            [album.id, album.title, onDelete],
         );
 
         return (
-            <div className="relative group">
+            <div className="relative group h-full">
                 <PlayableCard
                     href={`/album/${album.id}`}
                     coverArt={
-                        album.coverArt
-                            ? api.getCoverArtUrl(album.coverArt, 300)
-                            : null
+                        album.coverArt ?
+                            api.getCoverArtUrl(album.coverArt, 300)
+                        :   null
                     }
                     title={album.title}
                     subtitle={album.artist?.name}
@@ -73,7 +74,7 @@ const AlbumCardItem = memo(
     },
     (prevProps, nextProps) => {
         return prevProps.album.id === nextProps.album.id;
-    }
+    },
 );
 
 const AlbumsGrid = memo(function AlbumsGrid({
@@ -101,19 +102,20 @@ const AlbumsGrid = memo(function AlbumsGrid({
     }
 
     return (
-        <div
-            data-tv-section="library-albums"
-            className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-4"
-        >
-            {albums.map((album, index) => (
-                <AlbumCardItem
-                    key={album.id}
-                    album={album}
-                    index={index}
-                    onPlay={onPlay}
-                    onDelete={onDelete}
-                />
-            ))}
+        <div data-tv-section="library-albums" className="h-full min-h-[400px]">
+            <VirtuosoGrid
+                useWindowScroll
+                data={albums}
+                listClassName="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-4"
+                itemContent={(index, album) => (
+                    <AlbumCardItem
+                        album={album}
+                        index={index}
+                        onPlay={onPlay}
+                        onDelete={onDelete}
+                    />
+                )}
+            />
         </div>
     );
 });

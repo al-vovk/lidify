@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { api } from "@/lib/api";
 
 export type JobType = "scan" | "discover";
@@ -21,10 +21,15 @@ export function useJobStatus(
 ) {
     const [jobStatus, setJobStatus] = useState<JobStatus | null>(null);
     const [isPolling, setIsPolling] = useState(false);
-    const pollInterval = options?.pollInterval || 5000; // Default: poll every 5 seconds (avoid rate limiting)
+    const pollInterval = options?.pollInterval || 5000;
+    const cancelledRef = useRef(false);
+
+    // Store latest options in ref to avoid stale closures
+    const optionsRef = useRef(options);
+    optionsRef.current = options;
 
     const checkStatus = useCallback(async () => {
-        if (!jobId) return;
+        if (!jobId || cancelledRef.current) return;
 
         try {
             let statusData;
@@ -34,33 +39,33 @@ export function useJobStatus(
                 statusData = await api.getDiscoverGenerationStatus(jobId);
             }
 
-            if (!statusData) return;
+            if (!statusData || cancelledRef.current) return;
 
             setJobStatus(statusData as JobStatus);
 
-            // Stop polling if job is complete or failed
             if (statusData.status === "completed") {
                 setIsPolling(false);
-                if (options?.onComplete && statusData.result) {
-                    options.onComplete(statusData.result);
+                if (optionsRef.current?.onComplete && statusData.result) {
+                    optionsRef.current.onComplete(statusData.result);
                 }
             } else if (statusData.status === "failed") {
                 setIsPolling(false);
-                if (options?.onError) {
+                if (optionsRef.current?.onError) {
                     const errorMsg =
                         statusData.result?.error ||
                         "Job failed with unknown error";
-                    options.onError(errorMsg);
+                    optionsRef.current.onError(errorMsg);
                 }
             }
         } catch (error: any) {
+            if (cancelledRef.current) return;
             console.error("Error checking job status:", error);
             setIsPolling(false);
-            if (options?.onError) {
-                options.onError(error.message || "Failed to check job status");
+            if (optionsRef.current?.onError) {
+                optionsRef.current.onError(error.message || "Failed to check job status");
             }
         }
-    }, [jobId, jobType, options]);
+    }, [jobId, jobType]);
 
     // Start polling when jobId is set
     useEffect(() => {
@@ -73,13 +78,16 @@ export function useJobStatus(
     useEffect(() => {
         if (!isPolling || !jobId) return;
 
-        // Check immediately
+        cancelledRef.current = false;
+
         checkStatus();
 
-        // Then poll at interval
         const interval = setInterval(checkStatus, pollInterval);
 
-        return () => clearInterval(interval);
+        return () => {
+            cancelledRef.current = true;
+            clearInterval(interval);
+        };
     }, [isPolling, jobId, checkStatus, pollInterval]);
 
     return {

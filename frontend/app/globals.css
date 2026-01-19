@@ -156,24 +156,20 @@ button:disabled {
     animation: shake 0.5s ease-in-out;
 }
 
-/* Galaxy Background Animations */
+/* Galaxy Background Animations - Stationary with brightness twinkle only */
 @keyframes galaxyFloat {
     0%,
     100% {
-        transform: translateY(0px) translateX(0px);
-        opacity: 0.4;
+        opacity: 0.3;
     }
     25% {
-        transform: translateY(-25px) translateX(15px);
-        opacity: 0.8;
+        opacity: 0.7;
     }
     50% {
-        transform: translateY(-15px) translateX(-15px);
-        opacity: 0.5;
+        opacity: 0.4;
     }
     75% {
-        transform: translateY(-20px) translateX(8px);
-        opacity: 0.7;
+        opacity: 0.6;
     }
 }
 
@@ -181,11 +177,9 @@ button:disabled {
     0%,
     100% {
         opacity: 0.2;
-        transform: scale(1);
     }
     50% {
         opacity: 0.8;
-        transform: scale(1.2);
     }
 }
 

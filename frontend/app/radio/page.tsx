@@ -7,6 +7,7 @@ import { api } from "@/lib/api";
 import { useAudioControls } from "@/lib/audio-controls-context";
 import { Track } from "@/lib/audio-state-context";
 import { toast } from "sonner";
+import { shuffleArray } from "@/utils/shuffle";
 
 interface RadioStation {
     id: string;
@@ -269,7 +270,7 @@ export default function RadioPage() {
             }
 
             // Shuffle the tracks
-            const shuffled = [...response.tracks].sort(() => Math.random() - 0.5);
+            const shuffled = shuffleArray(response.tracks);
 
             // Start playing
             playTracks(shuffled, 0);

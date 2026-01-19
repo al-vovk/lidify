@@ -1,5 +1,6 @@
 "use client";
 
+import DOMPurify from "dompurify";
 import { Plus, Loader2 } from "lucide-react";
 import { PodcastPreview } from "../types";
 import { formatDuration, formatDate } from "../utils";
@@ -112,7 +113,7 @@ export function PreviewEpisodes({
                         <div
                             className="prose prose-invert prose-sm max-w-none text-white/70 [&_a]:text-[#ecb200] [&_a]:no-underline [&_a:hover]:underline"
                             dangerouslySetInnerHTML={{
-                                __html: previewData.description,
+                                __html: DOMPurify.sanitize(previewData.description || ""),
                             }}
                         />
                     </div>

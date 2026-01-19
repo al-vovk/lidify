@@ -155,16 +155,10 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
 
             if (playbackType === "track") {
                 if (queue.length > 1) {
-                    console.log(
-                        "[HowlerAudioElement] Track failed, trying next in queue"
-                    );
                     lastTrackIdRef.current = null;
                     isLoadingRef.current = false;
                     next();
                 } else {
-                    console.log(
-                        "[HowlerAudioElement] Track failed, no more in queue - clearing"
-                    );
                     lastTrackIdRef.current = null;
                     isLoadingRef.current = false;
                     setCurrentTrack(null);

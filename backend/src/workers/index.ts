@@ -181,34 +181,66 @@ intervals.push(
 
 logger.debug("Data integrity check scheduled (every 24 hours)");
 
+/**
+ * Wrap an async operation with a timeout to prevent indefinite hangs
+ * Returns undefined if the operation times out (does not throw)
+ */
+async function withTimeout<T>(
+    operation: () => Promise<T>,
+    timeoutMs: number,
+    operationName: string
+): Promise<T | undefined> {
+    return Promise.race([
+        operation(),
+        new Promise<undefined>((resolve) =>
+            setTimeout(() => {
+                logger.warn(
+                    `Operation timed out after ${timeoutMs}ms: ${operationName}`
+                );
+                resolve(undefined);
+            }, timeoutMs)
+        ),
+    ]);
+}
+
 // Run stale download cleanup every 2 minutes
 // This catches downloads that timed out even if the queue cleaner isn't running
 // Also runs reconciliation to catch missed webhooks (fix for #31)
 intervals.push(
     setInterval(async () => {
         try {
-            // Mark stale/timed out downloads as failed
-            const staleCount =
-                await simpleDownloadManager.markStaleJobsAsFailed();
-            if (staleCount > 0) {
+            // Mark stale/timed out downloads as failed (60s timeout)
+            const staleCount = await withTimeout(
+                () => simpleDownloadManager.markStaleJobsAsFailed(),
+                60000,
+                "markStaleJobsAsFailed"
+            );
+            if (staleCount && staleCount > 0) {
                 logger.debug(
                     `⏰ Periodic cleanup: marked ${staleCount} stale download(s) as failed`
                 );
             }
 
-            // Reconcile with Lidarr (catches missed completion webhooks)
-            const lidarrResult =
-                await simpleDownloadManager.reconcileWithLidarr();
-            if (lidarrResult.reconciled > 0) {
+            // Reconcile with Lidarr (catches missed completion webhooks) (60s timeout)
+            const lidarrResult = await withTimeout(
+                () => simpleDownloadManager.reconcileWithLidarr(),
+                60000,
+                "reconcileWithLidarr"
+            );
+            if (lidarrResult && lidarrResult.reconciled > 0) {
                 logger.debug(
                     `✓ Periodic reconcile: ${lidarrResult.reconciled} job(s) matched in Lidarr`
                 );
             }
 
-            // Reconcile with local library (catches direct Soulseek downloads)
+            // Reconcile with local library (catches direct Soulseek downloads) (60s timeout)
             // Fix for #31: Active downloads not resolving
-            const localResult = await queueCleaner.reconcileWithLocalLibrary();
-            if (localResult.reconciled > 0) {
+            const localResult = await withTimeout(
+                () => queueCleaner.reconcileWithLocalLibrary(),
+                60000,
+                "reconcileWithLocalLibrary"
+            );
+            if (localResult && localResult.reconciled > 0) {
                 logger.debug(
                     `✓ Periodic reconcile: ${localResult.reconciled} job(s) matched in local library`
                 );
@@ -229,8 +261,13 @@ logger.debug("Stale download cleanup scheduled (every 2 minutes)");
 intervals.push(
     setInterval(async () => {
         try {
-            const result = await simpleDownloadManager.clearLidarrQueue();
-            if (result.removed > 0) {
+            // 90s timeout - Lidarr operations can be slow
+            const result = await withTimeout(
+                () => simpleDownloadManager.clearLidarrQueue(),
+                90000,
+                "clearLidarrQueue"
+            );
+            if (result && result.removed > 0) {
                 logger.debug(
                     `Periodic Lidarr cleanup: removed ${result.removed} stuck download(s)`
                 );

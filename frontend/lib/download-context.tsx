@@ -6,6 +6,8 @@ import {
     useState,
     ReactNode,
     useEffect,
+    useMemo,
+    useCallback,
 } from "react";
 import { useDownloadStatus } from "@/hooks/useDownloadStatus";
 import { useAuth } from "@/lib/auth-context";
@@ -107,43 +109,49 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
         return () => clearInterval(cleanup);
     }, []);
 
-    const addPendingDownload = (
+    const addPendingDownload = useCallback((
         type: "artist" | "album",
         subject: string,
         mbid: string
     ): string | null => {
-        // Check if already downloading this MBID
-        if (pendingDownloads.some((d) => d.mbid === mbid)) {
-            return null;
-        }
+        // Check synchronously first to avoid race conditions
+        let result: string | null = null;
 
-        const id = `${Date.now()}-${Math.random()}`;
-        const download: PendingDownload = {
-            id,
-            type,
-            subject,
-            mbid,
-            timestamp: Date.now(),
-        };
+        setPendingDownloads((prev) => {
+            // Check if already downloading this MBID
+            if (prev.some((d) => d.mbid === mbid)) {
+                return prev;
+            }
 
-        setPendingDownloads((prev) => [...prev, download]);
+            const id = `${Date.now()}-${Math.random()}`;
+            const download: PendingDownload = {
+                id,
+                type,
+                subject,
+                mbid,
+                timestamp: Date.now(),
+            };
 
-        return id;
-    };
+            result = id;
+            return [...prev, download];
+        });
 
-    const removePendingDownload = (id: string) => {
+        return result;
+    }, []);
+
+    const removePendingDownload = useCallback((id: string) => {
         setPendingDownloads((prev) => prev.filter((d) => d.id !== id));
-    };
+    }, []);
 
-    const removePendingByMbid = (mbid: string) => {
+    const removePendingByMbid = useCallback((mbid: string) => {
         setPendingDownloads((prev) => prev.filter((d) => d.mbid !== mbid));
-    };
+    }, []);
 
-    const isPending = (subject: string): boolean => {
+    const isPending = useCallback((subject: string): boolean => {
         return pendingDownloads.some((d) => d.subject === subject);
-    };
+    }, [pendingDownloads]);
 
-    const isPendingByMbid = (mbid: string): boolean => {
+    const isPendingByMbid = useCallback((mbid: string): boolean => {
         // Check both pending downloads AND active download jobs
         const isPendingLocal = pendingDownloads.some((d) => d.mbid === mbid);
         const hasActiveJob = downloadStatus.activeDownloads.some(
@@ -151,25 +159,35 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
         );
 
         return isPendingLocal || hasActiveJob;
-    };
+    }, [pendingDownloads, downloadStatus.activeDownloads]);
 
-    const isAnyPending = (): boolean => {
+    const isAnyPending = useCallback((): boolean => {
         return pendingDownloads.length > 0;
-    };
+    }, [pendingDownloads]);
+
+    // Memoize context value to prevent unnecessary re-renders
+    const contextValue = useMemo(() => ({
+        pendingDownloads,
+        downloadStatus,
+        addPendingDownload,
+        removePendingDownload,
+        removePendingByMbid,
+        isPending,
+        isPendingByMbid,
+        isAnyPending,
+    }), [
+        pendingDownloads,
+        downloadStatus,
+        addPendingDownload,
+        removePendingDownload,
+        removePendingByMbid,
+        isPending,
+        isPendingByMbid,
+        isAnyPending,
+    ]);
 
     return (
-        <DownloadContext.Provider
-            value={{
-                pendingDownloads,
-                downloadStatus,
-                addPendingDownload,
-                removePendingDownload,
-                removePendingByMbid,
-                isPending,
-                isPendingByMbid,
-                isAnyPending,
-            }}
-        >
+        <DownloadContext.Provider value={contextValue}>
             {children}
         </DownloadContext.Provider>
     );

@@ -252,7 +252,27 @@ router.post("/", async (req, res) => {
             rootFolderPath,
             message: "Download job created. Processing in background.",
         });
-    } catch (error) {
+    } catch (error: any) {
+        // Handle P2002 unique constraint violation - race condition caught by unique index
+        // This can happen when two transactions both see empty results from SKIP LOCKED
+        // and both attempt to insert, with one winning and the other hitting the unique constraint
+        if (error.code === "P2002") {
+            const { mbid } = req.body;
+            const existingJob = await prisma.downloadJob.findFirst({
+                where: {
+                    targetMbid: mbid,
+                    status: { in: ["pending", "processing"] },
+                },
+            });
+            if (existingJob) {
+                return res.json({
+                    id: existingJob.id,
+                    status: existingJob.status,
+                    duplicate: true,
+                    message: "Download already in progress",
+                });
+            }
+        }
         logger.error("Create download job error:", error);
         res.status(500).json({ error: "Failed to create download job" });
     }
@@ -363,37 +383,53 @@ async function processArtistDownload(
                 continue;
             }
 
-            // Use transaction to prevent race conditions when creating jobs
+            // Use transaction with row-level locking to prevent race conditions
             const jobResult = await prisma.$transaction(async (tx) => {
-                // Check for existing active job
-                const existingJob = await tx.downloadJob.findFirst({
-                    where: {
-                        targetMbid: albumMbid,
-                        status: { in: ["pending", "processing"] },
-                    },
-                });
+                // Check for existing active job with FOR UPDATE SKIP LOCKED
+                // This prevents TOCTOU race conditions like in the single download case
+                const existingJobs = await tx.$queryRaw<
+                    Array<{
+                        id: string;
+                        status: string;
+                        subject: string;
+                        createdAt: Date;
+                    }>
+                >`
+                    SELECT id, status, subject, "createdAt"
+                    FROM "DownloadJob"
+                    WHERE "targetMbid" = ${albumMbid}
+                    AND status IN ('pending', 'processing')
+                    FOR UPDATE SKIP LOCKED
+                `;
 
-                if (existingJob) {
+                if (existingJobs.length > 0) {
                     return {
                         skipped: true,
-                        job: existingJob,
+                        job: existingJobs[0],
                         reason: "already_queued",
                     };
                 }
 
                 // Also check for recently failed job (within last 30 seconds) to prevent spam retries
-                const recentFailed = await tx.downloadJob.findFirst({
-                    where: {
-                        targetMbid: albumMbid,
-                        status: "failed",
-                        completedAt: { gte: new Date(Date.now() - 30000) },
-                    },
-                });
+                const recentFailed = await tx.$queryRaw<
+                    Array<{
+                        id: string;
+                        status: string;
+                        completedAt: Date;
+                    }>
+                >`
+                    SELECT id, status, "completedAt"
+                    FROM "DownloadJob"
+                    WHERE "targetMbid" = ${albumMbid}
+                    AND status = 'failed'
+                    AND "completedAt" >= ${new Date(Date.now() - 30000)}
+                    FOR UPDATE SKIP LOCKED
+                `;
 
-                if (recentFailed) {
+                if (recentFailed.length > 0) {
                     return {
                         skipped: true,
-                        job: recentFailed,
+                        job: recentFailed[0],
                         reason: "recently_failed",
                     };
                 }

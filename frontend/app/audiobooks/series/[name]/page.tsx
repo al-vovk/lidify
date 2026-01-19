@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
-import { useAudio } from "@/lib/audio-context";
+import { useAudioState, useAudioPlayback, useAudioControls } from "@/lib/audio-context";
 import { useToast } from "@/lib/toast-context";
 import {
     ArrowLeft,
@@ -46,14 +46,9 @@ export default function SeriesDetailPage() {
     const router = useRouter();
     const { isAuthenticated } = useAuth();
     const { toast } = useToast();
-    const {
-        playAudiobook,
-        currentAudiobook,
-        isPlaying,
-        pause,
-        resume,
-        playbackType,
-    } = useAudio();
+    const { currentAudiobook, playbackType } = useAudioState();
+    const { isPlaying } = useAudioPlayback();
+    const { playAudiobook, pause, resume } = useAudioControls();
 
     const seriesName = decodeURIComponent(params.name as string);
     const [books, setBooks] = useState<Audiobook[]>([]);

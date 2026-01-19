@@ -531,7 +531,7 @@ class HowlerEngine {
                             oldHowl.stop();
                             oldHowl.unload();
                         } catch {
-                            // ignore
+                            // Intentionally ignored: Howl instance is being destroyed, cleanup errors are harmless
                         }
                     }, this.popFadeMs + 2);
                 } else {
@@ -540,7 +540,7 @@ class HowlerEngine {
                     oldHowl.unload();
                 }
             } catch {
-                // Ignore errors during cleanup
+                // Intentionally ignored: cleanup errors on destroyed Howl are harmless
             }
         }
 

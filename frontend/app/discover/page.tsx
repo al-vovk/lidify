@@ -4,7 +4,7 @@ import { useState } from "react";
 import { RefreshCw, Music2 } from "lucide-react";
 import { cn } from "@/utils/cn";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
-import { useAudio } from "@/lib/audio-context";
+import { useAudioState, useAudioPlayback } from "@/lib/audio-context";
 import { useDiscoverData } from "@/features/discover/hooks/useDiscoverData";
 import { useDiscoverActions } from "@/features/discover/hooks/useDiscoverActions";
 import { usePreviewPlayer } from "@/features/discover/hooks/usePreviewPlayer";
@@ -16,7 +16,9 @@ import { UnavailableAlbums } from "@/features/discover/components/UnavailableAlb
 import { HowItWorks } from "@/features/discover/components/HowItWorks";
 
 export default function DiscoverWeeklyPage() {
-    const { currentTrack, isPlaying } = useAudio();
+    // Use split hooks to avoid re-renders from currentTime updates
+    const { currentTrack } = useAudioState();
+    const { isPlaying } = useAudioPlayback();
     const [showSettings, setShowSettings] = useState(false);
 
     // Custom hooks - single source of truth for batch status from useDiscoverData
