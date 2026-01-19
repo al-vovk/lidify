@@ -59,6 +59,8 @@ export default function LibraryPage() {
             sortBy,
             limit: itemsPerPage,
             page: currentPage,
+        },
+        {
             enabled: activeTab === "artists",
         },
     );
@@ -69,6 +71,8 @@ export default function LibraryPage() {
             sortBy,
             limit: itemsPerPage,
             page: currentPage,
+        },
+        {
             enabled: activeTab === "albums",
         },
     );
@@ -78,6 +82,8 @@ export default function LibraryPage() {
             sortBy,
             limit: itemsPerPage,
             page: currentPage,
+        },
+        {
             enabled: activeTab === "tracks",
         },
     );
