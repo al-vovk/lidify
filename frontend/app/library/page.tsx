@@ -53,11 +53,10 @@ export default function LibraryPage() {
 
     // Use React Query hooks for cached data fetching
     // Only fetch data for active tab to prevent unnecessary API calls
-    const artistsQuery = useLibraryArtistsQuery({
+    const artistsQuery = useLibraryArtistsInfiniteQuery({
         filter,
         sortBy,
         limit: itemsPerPage,
-        page: currentPage,
         enabled: activeTab === "artists",
     });
 
@@ -76,9 +75,8 @@ export default function LibraryPage() {
 
     // Get data based on active tab
     const artists = useMemo(
-        () =>
-            activeTab === "artists" ? (artistsQuery.data?.artists ?? []) : [],
-        [activeTab, artistsQuery.data?.artists],
+        () => (activeTab === "artists" ? (artistsQuery.data?.pages.flatMap(page => page.artists) ?? []) : []),
+        [activeTab, artistsQuery.data?.pages],
     );
     const albums = useMemo(
         () => (activeTab === "albums" ? (albumsQuery.data?.pages.flatMap(page => page.albums) ?? []) : []),
@@ -100,7 +98,7 @@ export default function LibraryPage() {
         () => {
             // Get the total from the first page of data
             const total = 
-                activeTab === "artists" ? (artistsQuery.data?.total ?? 0)
+                activeTab === "artists" ? (artistsQuery.data?.pages[0]?.total ?? 0)
                 : activeTab === "albums" ? (albumsQuery.data?.pages[0]?.total ?? 0)
                 : (tracksQuery.data?.pages[0]?.total ?? 0);
             
