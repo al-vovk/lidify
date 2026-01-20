@@ -35,27 +35,44 @@ export const queryKeys = {
     album: (id: string) => ["album", id] as const,
     albumLibrary: (id: string) => ["album", "library", id] as const,
     albumDiscovery: (id: string) => ["album", "discovery", id] as const,
-    albums: (filters?: Record<string, any>) => ["albums", filters] as const,
+    albums: (filters?: Record<string, unknown>) => ["albums", filters] as const,
 
     // Library queries
     library: () => ["library"] as const,
-    libraryArtists: (params: { filter?: string; sortBy?: string; limit?: number; offset?: number }) =>
-        ["library", "artists", params] as const,
-    libraryAlbums: (params: { filter?: string; sortBy?: string; limit?: number; offset?: number }) =>
-        ["library", "albums", params] as const,
-    libraryTracks: (params: { sortBy?: string; limit?: number; offset?: number }) =>
-        ["library", "tracks", params] as const,
-    recentlyListened: (limit?: number) => ["library", "recently-listened", limit] as const,
-    recentlyAdded: (limit?: number) => ["library", "recently-added", limit] as const,
+    libraryArtists: (params: {
+        filter?: string;
+        sortBy?: string;
+        limit?: number;
+        offset?: number;
+    }) => ["library", "artists", params] as const,
+    libraryAlbums: (params: {
+        filter?: string;
+        sortBy?: string;
+        limit?: number;
+        offset?: number;
+    }) => ["library", "albums", params] as const,
+    libraryTracks: (params: {
+        sortBy?: string;
+        limit?: number;
+        offset?: number;
+    }) => ["library", "tracks", params] as const,
+    recentlyListened: (limit?: number) =>
+        ["library", "recently-listened", limit] as const,
+    recentlyAdded: (limit?: number) =>
+        ["library", "recently-added", limit] as const,
 
     // Recommendations
     recommendations: (limit?: number) => ["recommendations", limit] as const,
-    similarArtists: (seedArtistId: string, limit?: number) => ["recommendations", "artists", seedArtistId, limit] as const,
-    similarAlbums: (seedAlbumId: string, limit?: number) => ["recommendations", "albums", seedAlbumId, limit] as const,
+    similarArtists: (seedArtistId: string, limit?: number) =>
+        ["recommendations", "artists", seedArtistId, limit] as const,
+    similarAlbums: (seedAlbumId: string, limit?: number) =>
+        ["recommendations", "albums", seedAlbumId, limit] as const,
 
     // Search
-    search: (query: string, type?: string, limit?: number) => ["search", query, type, limit] as const,
-    discoverSearch: (query: string, type?: string, limit?: number) => ["search", "discover", query, type, limit] as const,
+    search: (query: string, type?: string, limit?: number) =>
+        ["search", query, type, limit] as const,
+    discoverSearch: (query: string, type?: string, limit?: number) =>
+        ["search", "discover", query, type, limit] as const,
 
     // Playlists
     playlists: () => ["playlists"] as const,
@@ -75,7 +92,8 @@ export const queryKeys = {
     // Podcasts
     podcasts: () => ["podcasts"] as const,
     podcast: (id: string) => ["podcast", id] as const,
-    topPodcasts: (limit?: number, genreId?: number) => ["podcasts", "top", limit, genreId] as const,
+    topPodcasts: (limit?: number, genreId?: number) =>
+        ["podcasts", "top", limit, genreId] as const,
 
     // Browse (Deezer playlists/radios)
     browseAll: () => ["browse", "all"] as const,
@@ -301,6 +319,7 @@ interface LibraryArtistsParams {
     sortBy?: SortOption;
     limit?: number;
     page?: number;
+    enabled?: boolean;
 }
 
 interface LibraryAlbumsParams {
@@ -463,7 +482,10 @@ export function useRecommendationsQuery(limit: number = 10) {
  * @example
  * const { data } = useSimilarArtistsQuery("artist-123", 20);
  */
-export function useSimilarArtistsQuery(seedArtistId: string | undefined, limit: number = 20) {
+export function useSimilarArtistsQuery(
+    seedArtistId: string | undefined,
+    limit: number = 20,
+) {
     return useQuery({
         queryKey: queryKeys.similarArtists(seedArtistId || "", limit),
         queryFn: async () => {
@@ -482,7 +504,10 @@ export function useSimilarArtistsQuery(seedArtistId: string | undefined, limit: 
  * @param limit - Number of recommendations (default: 20)
  * @returns Query result with similar albums
  */
-export function useSimilarAlbumsQuery(seedAlbumId: string | undefined, limit: number = 20) {
+export function useSimilarAlbumsQuery(
+    seedAlbumId: string | undefined,
+    limit: number = 20,
+) {
     return useQuery({
         queryKey: queryKeys.similarAlbums(seedAlbumId || "", limit),
         queryFn: async () => {
@@ -513,8 +538,14 @@ export function useSimilarAlbumsQuery(seedAlbumId: string | undefined, limit: nu
  */
 export function useSearchQuery(
     query: string,
-    type: "all" | "artists" | "albums" | "tracks" | "audiobooks" | "podcasts" = "all",
-    limit: number = 20
+    type:
+        | "all"
+        | "artists"
+        | "albums"
+        | "tracks"
+        | "audiobooks"
+        | "podcasts" = "all",
+    limit: number = 20,
 ) {
     return useQuery({
         queryKey: queryKeys.search(query, type, limit),
@@ -538,7 +569,7 @@ export function useSearchQuery(
 export function useDiscoverSearchQuery(
     query: string,
     type: "music" | "podcasts" | "all" = "music",
-    limit: number = 20
+    limit: number = 20,
 ) {
     return useQuery({
         queryKey: queryKeys.discoverSearch(query, type, limit),
@@ -722,9 +753,13 @@ export function usePodcastQuery(id: string | undefined) {
 
             try {
                 return await api.getPodcast(id);
-            } catch (error: any) {
+            } catch (error) {
                 // If podcast not found (404), return null to allow preview mode
-                if (error?.status === 404 || error?.message?.includes('not found') || error?.message?.includes('not subscribed')) {
+                if (
+                    error?.status === 404 ||
+                    error?.message?.includes("not found") ||
+                    error?.message?.includes("not subscribed")
+                ) {
                     return null;
                 }
                 // For other errors, throw to trigger error state
@@ -791,16 +826,21 @@ export function useAddToPlaylistMutation() {
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: ({ playlistId, trackId }: { playlistId: string; trackId: string }) =>
-            api.addTrackToPlaylist(playlistId, trackId),
+        mutationFn: ({
+            playlistId,
+            trackId,
+        }: {
+            playlistId: string;
+            trackId: string;
+        }) => api.addTrackToPlaylist(playlistId, trackId),
         onSuccess: (_, variables) => {
             // Invalidate the specific playlist query
             queryClient.invalidateQueries({
-                queryKey: queryKeys.playlist(variables.playlistId)
+                queryKey: queryKeys.playlist(variables.playlistId),
             });
             // Also invalidate the playlists list
             queryClient.invalidateQueries({
-                queryKey: queryKeys.playlists()
+                queryKey: queryKeys.playlists(),
             });
         },
     });
@@ -819,12 +859,17 @@ export function useCreatePlaylistMutation() {
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: ({ name, isPublic }: { name: string; isPublic?: boolean }) =>
-            api.createPlaylist(name, isPublic),
+        mutationFn: ({
+            name,
+            isPublic,
+        }: {
+            name: string;
+            isPublic?: boolean;
+        }) => api.createPlaylist(name, isPublic),
         onSuccess: () => {
             // Invalidate playlists list to show new playlist
             queryClient.invalidateQueries({
-                queryKey: queryKeys.playlists()
+                queryKey: queryKeys.playlists(),
             });
         },
     });
@@ -847,7 +892,7 @@ export function useDeletePlaylistMutation() {
         onSuccess: () => {
             // Invalidate playlists list
             queryClient.invalidateQueries({
-                queryKey: queryKeys.playlists()
+                queryKey: queryKeys.playlists(),
             });
         },
     });
@@ -914,7 +959,7 @@ export function useFeaturedPlaylistsQuery(limit: number = 50) {
         queryKey: queryKeys.browseFeatured(limit),
         queryFn: async (): Promise<PlaylistPreview[]> => {
             const response = await api.get<{ playlists: PlaylistPreview[] }>(
-                `/browse/playlists/featured?limit=${limit}`
+                `/browse/playlists/featured?limit=${limit}`,
             );
             return response.playlists;
         },
@@ -933,7 +978,7 @@ export function useRadiosQuery(limit: number = 50) {
         queryKey: queryKeys.browseRadios(limit),
         queryFn: async (): Promise<PlaylistPreview[]> => {
             const response = await api.get<{ radios: PlaylistPreview[] }>(
-                `/browse/radios?limit=${limit}`
+                `/browse/radios?limit=${limit}`,
             );
             return response.radios;
         },
