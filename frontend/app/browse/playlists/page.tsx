@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import { Search, Loader2, Music2, Link2, X, ChevronRight, Info } from "lucide-react";
 import { api } from "@/lib/api";
 import { useToast } from "@/lib/toast-context";
@@ -199,10 +200,13 @@ export default function BrowsePlaylistsPage() {
         >
             <div className="relative aspect-square mb-3 rounded-md overflow-hidden bg-[#282828] shadow-lg">
                 {item.imageUrl ? (
-                    <img
+                    <Image
                         src={item.imageUrl}
                         alt={item.title}
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                        fill
+                        sizes="(max-width: 640px) 50vw, (max-width: 768px) 33vw, (max-width: 1024px) 25vw, (max-width: 1280px) 20vw, (max-width: 1536px) 16vw, 14vw"
+                        className="object-cover group-hover:scale-105 transition-transform duration-300"
+                        unoptimized
                     />
                 ) : (
                     <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-[#AD47FF]/30 to-[#AD47FF]/10">
@@ -239,10 +243,13 @@ export default function BrowsePlaylistsPage() {
             className="group cursor-pointer relative aspect-square rounded-lg overflow-hidden"
         >
             {genre.imageUrl ? (
-                <img
+                <Image
                     src={genre.imageUrl}
                     alt={genre.name}
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                    fill
+                    sizes="(max-width: 640px) 50vw, (max-width: 768px) 33vw, (max-width: 1024px) 25vw, (max-width: 1280px) 20vw, 16vw"
+                    className="object-cover group-hover:scale-105 transition-transform duration-300"
+                    unoptimized
                 />
             ) : (
                 <div className="w-full h-full bg-gradient-to-br from-[#AD47FF] to-[#ecb200]" />

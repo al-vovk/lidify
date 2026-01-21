@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useState, useRef, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
-import { Loader2, Mic2, Search, Plus } from "lucide-react";
+import { Mic2, Search, Plus } from "lucide-react";
 import { useToast } from "@/lib/toast-context";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { usePodcastsQuery, useTopPodcastsQuery } from "@/hooks/useQueries";
@@ -59,22 +60,22 @@ export default function PodcastsPage() {
     const { data: topPodcasts = [], isLoading: isLoadingTopPodcasts } =
         useTopPodcastsQuery(12);
 
-    // Load discovery data manually (complex multi-genre fetch)
-    const [relatedPodcasts, setRelatedPodcasts] = useState<{
-        [key: string]: SearchResult[];
-    }>({});
-    
+    // Fetch genre-based discovery podcasts
+    const { data: relatedPodcasts = {} } = useQuery({
+        queryKey: ["podcasts", "discovery", "genres"],
+        queryFn: async () => {
+            const genreIds = [1303, 1324, 1489, 1488, 1321, 1545, 1502];
+            return api.getPodcastsByGenre(genreIds);
+        },
+        staleTime: 10 * 60 * 1000,
+        enabled: isAuthenticated,
+    });
+
     // Sorting and pagination state for "My Podcasts"
     type SortOption = 'title' | 'author' | 'recent';
     const [sortBy, setSortBy] = useState<SortOption>('title');
     const [itemsPerPage, setItemsPerPage] = useState<number>(50);
     const [currentPage, setCurrentPage] = useState(1);
-
-    useEffect(() => {
-        if (isAuthenticated) {
-            loadDiscovery();
-        }
-    }, [isAuthenticated]);
 
     const isLoading = isLoadingPodcasts || isLoadingTopPodcasts;
 
@@ -167,28 +168,6 @@ export default function PodcastsPage() {
             }
         };
     }, [searchQuery]);
-
-    const loadDiscovery = async () => {
-        try {
-            // Load popular genres
-            // iTunes genre IDs: Comedy=1303, Society&Culture=1324, News=1489,
-            // True Crime=1488, Business=1321, Sports=1545, Leisure=1502
-            const genreIds = [
-                1303, // Comedy
-                1324, // Society & Culture
-                1489, // News
-                1488, // True Crime
-                1321, // Business
-                1545, // Sports
-                1502, // Leisure (Gaming & Hobbies)
-            ];
-
-            const genreData = await api.getPodcastsByGenre(genreIds);
-            setRelatedPodcasts(genreData);
-        } catch (error) {
-            console.error("Failed to load podcast discovery:", error);
-        }
-    };
 
     const handleSubscribe = async (result: SearchResult | any) => {
         try {

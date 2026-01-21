@@ -445,11 +445,16 @@ function SpotifyImportPageContent() {
                         {/* Playlist Info */}
                         <div className="flex items-start gap-4 p-4 bg-white/5 rounded-lg">
                             {preview.playlist.imageUrl ? (
-                                <img
-                                    src={preview.playlist.imageUrl}
-                                    alt={preview.playlist.name}
-                                    className="w-20 h-20 rounded-md object-cover"
-                                />
+                                <div className="relative w-20 h-20">
+                                    <Image
+                                        src={preview.playlist.imageUrl}
+                                        alt={preview.playlist.name}
+                                        fill
+                                        sizes="80px"
+                                        className="rounded-md object-cover"
+                                        unoptimized
+                                    />
+                                </div>
                             ) : (
                                 <div className="w-20 h-20 rounded-md bg-white/10 flex items-center justify-center">
                                     <Image
@@ -685,15 +690,16 @@ function SpotifyImportPageContent() {
                                                                 className="w-4 h-4 rounded border-white/20 bg-transparent text-[#1DB954] focus:ring-[#1DB954] focus:ring-offset-0"
                                                             />
                                                             {album.coverUrl && (
-                                                                <img
-                                                                    src={
-                                                                        album.coverUrl
-                                                                    }
-                                                                    alt={
-                                                                        album.albumName
-                                                                    }
-                                                                    className="w-10 h-10 rounded object-cover"
-                                                                />
+                                                                <div className="relative w-10 h-10">
+                                                                    <Image
+                                                                        src={album.coverUrl}
+                                                                        alt={album.albumName}
+                                                                        fill
+                                                                        sizes="40px"
+                                                                        className="rounded object-cover"
+                                                                        unoptimized
+                                                                    />
+                                                                </div>
                                                             )}
                                                             <div className="flex-1 min-w-0">
                                                                 <div className="text-sm text-white truncate">

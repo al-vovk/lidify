@@ -1,4 +1,5 @@
 import { useSearchQuery, useDiscoverSearchQuery } from "@/hooks/useQueries";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import type { SearchResult, DiscoverResult } from "../types";
 import { useMemo } from "react";
 
@@ -15,26 +16,27 @@ interface UseSearchDataReturn {
 }
 
 export function useSearchData({ query }: UseSearchDataProps): UseSearchDataReturn {
-    // React Query automatically handles debouncing through the enabled flag
-    // Queries only run when query is at least 2 characters
+    // Debounce query to prevent excessive API calls during typing
+    const debouncedQuery = useDebouncedValue(query, 250);
+
     const {
         data: libraryResults,
         isLoading: isLibrarySearching,
         isFetching: isLibraryFetching
-    } = useSearchQuery(query, "all", 20);
+    } = useSearchQuery(debouncedQuery, "all", 20);
 
     const {
         data: discoverData,
         isLoading: isDiscoverSearching,
         isFetching: isDiscoverFetching
-    } = useDiscoverSearchQuery(query, "all", 20);
+    } = useDiscoverSearchQuery(debouncedQuery, "all", 20);
 
     // Extract discover results
     const discoverResults = useMemo(() => {
         return discoverData?.results || [];
     }, [discoverData]);
 
-    // Track if user has searched (query is at least 2 characters)
+    // Track if user has searched (use original query for immediate UI feedback)
     const hasSearched = query.trim().length >= 2;
 
     return {

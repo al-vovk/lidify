@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { Disc3 } from "lucide-react";
@@ -60,15 +61,18 @@ export default function AlbumsPage() {
                         >
                             <div className="bg-gradient-to-br from-[#121212] to-[#121212] hover:from-[#181818] hover:to-[#1a1a1a] transition-all duration-300 p-3 rounded-lg group cursor-pointer border border-white/5 hover:border-white/10 hover:scale-105 hover:shadow-2xl">
                                 <div className="aspect-square bg-[#181818] rounded-lg mb-3 p-3 flex items-center justify-center">
-                                    <div className="w-full h-full rounded-full overflow-hidden shadow-lg bg-[#1a1a1a]">
+                                    <div className="relative w-full h-full rounded-full overflow-hidden shadow-lg bg-[#1a1a1a]">
                                         {album.coverArt ? (
-                                            <img
+                                            <Image
                                                 src={api.getCoverArtUrl(
                                                     album.coverArt,
                                                     300
                                                 )}
                                                 alt={album.title}
-                                                className="w-full h-full object-cover group-hover:scale-110 transition-all"
+                                                fill
+                                                sizes="(max-width: 640px) 50vw, (max-width: 768px) 33vw, 16vw"
+                                                className="object-cover group-hover:scale-110 transition-all"
+                                                unoptimized
                                             />
                                         ) : (
                                             <Disc3 className="w-12 h-12 text-gray-600" />

@@ -1261,22 +1261,26 @@ class ApiClient {
             | "tracks"
             | "audiobooks"
             | "podcasts" = "all",
-        limit: number = 20
+        limit: number = 20,
+        signal?: AbortSignal
     ) {
         return this.request<any>(
-            `/search?q=${encodeURIComponent(query)}&type=${type}&limit=${limit}`
+            `/search?q=${encodeURIComponent(query)}&type=${type}&limit=${limit}`,
+            { signal }
         );
     }
 
     async discoverSearch(
         query: string,
         type: "music" | "podcasts" | "all" = "music",
-        limit: number = 20
+        limit: number = 20,
+        signal?: AbortSignal
     ) {
         return this.request<any>(
             `/search/discover?q=${encodeURIComponent(
                 query
-            )}&type=${type}&limit=${limit}`
+            )}&type=${type}&limit=${limit}`,
+            { signal }
         );
     }
 

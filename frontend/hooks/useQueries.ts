@@ -16,8 +16,9 @@
  * - Playlists: 1 minute (user may be actively modifying)
  */
 
-import { useQuery, useMutation, useQueryClient, UseInfiniteQueryOptions } from "@tanstack/react-query";
+import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import type { Artist, Album, Track } from "@/features/library/types";
 
 // ============================================================================
 // QUERY KEY FACTORIES
@@ -126,7 +127,7 @@ export function useArtistQuery(id: string | undefined) {
             // Try library first
             try {
                 return await api.getArtist(id);
-            } catch (error) {
+            } catch {
                 // Fallback to discovery
                 return await api.getArtistDiscovery(id);
             }
@@ -197,7 +198,7 @@ export function useAlbumQuery(id: string | undefined) {
             // Try library first
             try {
                 return await api.getAlbum(id);
-            } catch (error) {
+            } catch {
                 // Fallback to discovery
                 return await api.getAlbumDiscovery(id);
             }
@@ -327,13 +328,81 @@ interface LibraryAlbumsParams {
     sortBy?: SortOption;
     limit?: number;
     page?: number;
+    enabled?: boolean;
 }
 
 interface LibraryTracksParams {
     sortBy?: SortOption;
     limit?: number;
     page?: number;
+    enabled?: boolean;
 }
+
+// Page response types for infinite queries
+interface ArtistsPageResponse {
+    artists: Artist[];
+    total: number;
+    offset: number;
+    limit: number;
+}
+
+interface AlbumsPageResponse {
+    albums: Album[];
+    total: number;
+    offset: number;
+    limit: number;
+}
+
+interface TracksPageResponse {
+    tracks: Track[];
+    total: number;
+    offset: number;
+    limit: number;
+}
+
+// Sort functions - defined once outside components to prevent recreation
+const sortArtists = (artists: Artist[], sortBy: SortOption): Artist[] => {
+    return [...artists].sort((a, b) => {
+        switch (sortBy) {
+            case "name":
+                return a.name.localeCompare(b.name);
+            case "name-desc":
+                return b.name.localeCompare(a.name);
+            case "tracks":
+                return (b.trackCount || 0) - (a.trackCount || 0);
+            default:
+                return 0;
+        }
+    });
+};
+
+const sortAlbums = (albums: Album[], sortBy: SortOption): Album[] => {
+    return [...albums].sort((a, b) => {
+        switch (sortBy) {
+            case "name":
+                return a.title.localeCompare(b.title);
+            case "name-desc":
+                return b.title.localeCompare(a.title);
+            case "recent":
+                return (b.year || 0) - (a.year || 0);
+            default:
+                return 0;
+        }
+    });
+};
+
+const sortTracks = (tracks: Track[], sortBy: SortOption): Track[] => {
+    return [...tracks].sort((a, b) => {
+        switch (sortBy) {
+            case "name":
+                return a.title.localeCompare(b.title);
+            case "name-desc":
+                return b.title.localeCompare(a.title);
+            default:
+                return 0;
+        }
+    });
+};
 
 /**
  * Hook to fetch library artists with pagination and filtering
@@ -345,32 +414,20 @@ export function useLibraryArtistsQuery({
     sortBy = "name",
     limit = 40,
     page = 1,
+    enabled = true,
 }: LibraryArtistsParams = {}) {
     const offset = (page - 1) * limit;
     return useQuery({
         queryKey: queryKeys.libraryArtists({ filter, sortBy, limit, offset }),
-        queryFn: async () => {
-            const response = await api.getArtists({ limit, offset, filter });
-            const sortedArtists = [...response.artists].sort((a, b) => {
-                switch (sortBy) {
-                    case "name":
-                        return a.name.localeCompare(b.name);
-                    case "name-desc":
-                        return b.name.localeCompare(a.name);
-                    case "tracks":
-                        return (b.trackCount || 0) - (a.trackCount || 0);
-                    default:
-                        return 0;
-                }
-            });
-            return {
-                artists: sortedArtists,
-                total: response.total,
-                offset: response.offset,
-                limit: response.limit,
-            };
-        },
+        queryFn: () => api.getArtists({ limit, offset, filter }),
+        select: (response) => ({
+            artists: sortArtists(response.artists, sortBy),
+            total: response.total,
+            offset: response.offset,
+            limit: response.limit,
+        }),
         staleTime: 2 * 60 * 1000,
+        enabled,
     });
 }
 
@@ -386,40 +443,26 @@ export function useLibraryAlbumsInfiniteQuery(
         limit = 40,
         enabled = true,
     }: Omit<LibraryAlbumsParams, 'page'> & { enabled?: boolean } = {},
-    options: Omit<UseInfiniteQueryOptions, 'queryKey' | 'queryFn' | 'getNextPageParam' | 'initialPageParam'> = {}
 ) {
-    return useInfiniteQuery({
+    return useInfiniteQuery<AlbumsPageResponse, Error, { pages: AlbumsPageResponse[], pageParams: number[] }, readonly unknown[], number>({
         queryKey: queryKeys.libraryAlbums({ filter, sortBy, limit }),
-        queryFn: async ({ pageParam = 1 }) => {
+        queryFn: async ({ pageParam }) => {
             const offset = (pageParam - 1) * limit;
             const response = await api.getAlbums({ limit, offset, filter });
-            const sortedAlbums = [...response.albums].sort((a, b) => {
-                switch (sortBy) {
-                    case "name":
-                        return a.title.localeCompare(b.title);
-                    case "name-desc":
-                        return b.title.localeCompare(a.title);
-                    case "recent":
-                        return (b.year || 0) - (a.year || 0);
-                    default:
-                        return 0;
-                }
-            });
             return {
-                albums: sortedAlbums,
+                albums: sortAlbums(response.albums, sortBy),
                 total: response.total,
                 offset: response.offset,
                 limit: response.limit,
             };
         },
-        getNextPageParam: (lastPage, allPages) => {
+        getNextPageParam: (lastPage: AlbumsPageResponse, allPages: AlbumsPageResponse[]) => {
             const totalItems = lastPage.total;
             const fetchedItems = allPages.flatMap(page => page.albums).length;
             return fetchedItems < totalItems ? allPages.length + 1 : undefined;
         },
         initialPageParam: 1,
         enabled,
-        ...options,
     });
 }
 
@@ -435,40 +478,26 @@ export function useLibraryArtistsInfiniteQuery(
         limit = 40,
         enabled = true,
     }: Omit<LibraryArtistsParams, 'page'> & { enabled?: boolean } = {},
-    options: Omit<UseInfiniteQueryOptions, 'queryKey' | 'queryFn' | 'getNextPageParam' | 'initialPageParam'> = {}
 ) {
-    return useInfiniteQuery({
+    return useInfiniteQuery<ArtistsPageResponse, Error, { pages: ArtistsPageResponse[], pageParams: number[] }, readonly unknown[], number>({
         queryKey: queryKeys.libraryArtists({ filter, sortBy, limit }),
-        queryFn: async ({ pageParam = 1 }) => {
+        queryFn: async ({ pageParam }) => {
             const offset = (pageParam - 1) * limit;
             const response = await api.getArtists({ limit, offset, filter });
-            const sortedArtists = [...response.artists].sort((a, b) => {
-                switch (sortBy) {
-                    case "name":
-                        return a.name.localeCompare(b.name);
-                    case "name-desc":
-                        return b.name.localeCompare(a.name);
-                    case "tracks":
-                        return (b.trackCount || 0) - (a.trackCount || 0);
-                    default:
-                        return 0;
-                }
-            });
             return {
-                artists: sortedArtists,
+                artists: sortArtists(response.artists, sortBy),
                 total: response.total,
                 offset: response.offset,
                 limit: response.limit,
             };
         },
-        getNextPageParam: (lastPage, allPages) => {
+        getNextPageParam: (lastPage: ArtistsPageResponse, allPages: ArtistsPageResponse[]) => {
             const totalItems = lastPage.total;
             const fetchedItems = allPages.flatMap(page => page.artists).length;
             return fetchedItems < totalItems ? allPages.length + 1 : undefined;
         },
         initialPageParam: 1,
         enabled,
-        ...options,
     });
 }
 
@@ -482,32 +511,20 @@ export function useLibraryAlbumsQuery({
     sortBy = "name",
     limit = 40,
     page = 1,
+    enabled = true,
 }: LibraryAlbumsParams = {}) {
     const offset = (page - 1) * limit;
     return useQuery({
         queryKey: queryKeys.libraryAlbums({ filter, sortBy, limit, offset }),
-        queryFn: async () => {
-            const response = await api.getAlbums({ limit, offset, filter });
-            const sortedAlbums = [...response.albums].sort((a, b) => {
-                switch (sortBy) {
-                    case "name":
-                        return a.title.localeCompare(b.title);
-                    case "name-desc":
-                        return b.title.localeCompare(a.title);
-                    case "recent":
-                        return (b.year || 0) - (a.year || 0);
-                    default:
-                        return 0;
-                }
-            });
-            return {
-                albums: sortedAlbums,
-                total: response.total,
-                offset: response.offset,
-                limit: response.limit,
-            };
-        },
+        queryFn: () => api.getAlbums({ limit, offset, filter }),
+        select: (response) => ({
+            albums: sortAlbums(response.albums, sortBy),
+            total: response.total,
+            offset: response.offset,
+            limit: response.limit,
+        }),
         staleTime: 2 * 60 * 1000,
+        enabled,
     });
 }
 
@@ -522,38 +539,26 @@ export function useLibraryTracksInfiniteQuery(
         limit = 40,
         enabled = true,
     }: Omit<LibraryTracksParams, 'page'> & { enabled?: boolean } = {},
-    options: Omit<UseInfiniteQueryOptions, 'queryKey' | 'queryFn' | 'getNextPageParam' | 'initialPageParam'> = {}
 ) {
-    return useInfiniteQuery({
+    return useInfiniteQuery<TracksPageResponse, Error, { pages: TracksPageResponse[], pageParams: number[] }, readonly unknown[], number>({
         queryKey: queryKeys.libraryTracks({ sortBy, limit }),
-        queryFn: async ({ pageParam = 1 }) => {
+        queryFn: async ({ pageParam }) => {
             const offset = (pageParam - 1) * limit;
             const response = await api.getTracks({ limit, offset });
-            const sortedTracks = [...response.tracks].sort((a, b) => {
-                switch (sortBy) {
-                    case "name":
-                        return a.title.localeCompare(b.title);
-                    case "name-desc":
-                        return b.title.localeCompare(a.title);
-                    default:
-                        return 0;
-                }
-            });
             return {
-                tracks: sortedTracks,
+                tracks: sortTracks(response.tracks, sortBy),
                 total: response.total,
                 offset: response.offset,
                 limit: response.limit,
             };
         },
-        getNextPageParam: (lastPage, allPages) => {
+        getNextPageParam: (lastPage: TracksPageResponse, allPages: TracksPageResponse[]) => {
             const totalItems = lastPage.total;
             const fetchedItems = allPages.flatMap(page => page.tracks).length;
             return fetchedItems < totalItems ? allPages.length + 1 : undefined;
         },
         initialPageParam: 1,
         enabled,
-        ...options,
     });
 }
 
@@ -566,30 +571,20 @@ export function useLibraryTracksQuery({
     sortBy = "name",
     limit = 40,
     page = 1,
+    enabled = true,
 }: LibraryTracksParams = {}) {
     const offset = (page - 1) * limit;
     return useQuery({
         queryKey: queryKeys.libraryTracks({ sortBy, limit, offset }),
-        queryFn: async () => {
-            const response = await api.getTracks({ limit, offset });
-            const sortedTracks = [...response.tracks].sort((a, b) => {
-                switch (sortBy) {
-                    case "name":
-                        return a.title.localeCompare(b.title);
-                    case "name-desc":
-                        return b.title.localeCompare(a.title);
-                    default:
-                        return 0;
-                }
-            });
-            return {
-                tracks: sortedTracks,
-                total: response.total,
-                offset: response.offset,
-                limit: response.limit,
-            };
-        },
+        queryFn: () => api.getTracks({ limit, offset }),
+        select: (response) => ({
+            tracks: sortTracks(response.tracks, sortBy),
+            total: response.total,
+            offset: response.offset,
+            limit: response.limit,
+        }),
         staleTime: 2 * 60 * 1000,
+        enabled,
     });
 }
 
@@ -693,7 +688,7 @@ export function useSearchQuery(
 ) {
     return useQuery({
         queryKey: queryKeys.search(query, type, limit),
-        queryFn: () => api.search(query, type, limit),
+        queryFn: ({ signal }) => api.search(query, type, limit, signal),
         enabled: query.length >= 2, // Only search if query is at least 2 characters
         staleTime: 5 * 60 * 1000, // 5 minutes
     });
@@ -717,7 +712,7 @@ export function useDiscoverSearchQuery(
 ) {
     return useQuery({
         queryKey: queryKeys.discoverSearch(query, type, limit),
-        queryFn: () => api.discoverSearch(query, type, limit),
+        queryFn: ({ signal }) => api.discoverSearch(query, type, limit, signal),
         enabled: query.length >= 2,
         staleTime: 5 * 60 * 1000, // 5 minutes
     });

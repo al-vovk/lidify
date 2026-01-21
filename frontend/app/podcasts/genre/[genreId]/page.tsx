@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
+import Image from "next/image";
 import { Mic2, ArrowLeft } from "lucide-react";
 import { api } from "@/lib/api";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
@@ -137,16 +138,15 @@ export default function GenrePage() {
                         onClick={() => handlePodcastClick(podcast)}
                         className="bg-gradient-to-br from-[#121212] to-[#121212] hover:from-[#181818] hover:to-[#1a1a1a] transition-all p-4 rounded-lg cursor-pointer group border border-[#1c1c1c]"
                     >
-                        <div className="w-full aspect-square bg-[#181818] rounded-full mb-3 overflow-hidden">
+                        <div className="relative w-full aspect-square bg-[#181818] rounded-full mb-3 overflow-hidden">
                             {podcast.coverUrl ? (
-                                <img
+                                <Image
                                     src={podcast.coverUrl}
                                     alt={podcast.title}
-                                    className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                                    loading="lazy"
-                                    onError={(e) => {
-                                        e.currentTarget.style.display = "none";
-                                    }}
+                                    fill
+                                    sizes="(max-width: 640px) 50vw, (max-width: 768px) 33vw, (max-width: 1024px) 25vw, 20vw"
+                                    className="object-cover group-hover:scale-105 transition-transform"
+                                    unoptimized
                                 />
                             ) : (
                                 <div className="w-full h-full flex items-center justify-center">

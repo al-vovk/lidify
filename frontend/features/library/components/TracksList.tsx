@@ -2,7 +2,6 @@
 
 import { useState, memo, useCallback } from "react";
 import Image from "next/image";
-import { Virtuoso } from "react-virtuoso";
 import { Track } from "../types";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { PlaylistSelector } from "@/components/ui/PlaylistSelector";
@@ -220,28 +219,22 @@ export function TracksList({
                 <div className="w-[140px] text-right pr-2">Duration</div>
             </div>
 
-            <div
-                data-tv-section="library-tracks"
-                className="h-full min-h-[400px]"
-            >
-                <Virtuoso
-                    useWindowScroll
-                    data={tracks}
-                    itemContent={(index, track) => {
-                        const isCurrentlyPlaying = currentTrackId === track.id;
-                        return (
-                            <TrackRow
-                                track={track}
-                                index={index}
-                                isCurrentlyPlaying={isCurrentlyPlaying}
-                                onPlayTrack={() => onPlay(tracks, index)}
-                                onAddToQueue={onAddToQueue}
-                                onShowAddToPlaylist={handleShowAddToPlaylist}
-                                onDelete={onDelete}
-                            />
-                        );
-                    }}
-                />
+            <div data-tv-section="library-tracks">
+                {tracks.map((track, index) => {
+                    const isCurrentlyPlaying = currentTrackId === track.id;
+                    return (
+                        <TrackRow
+                            key={track.id}
+                            track={track}
+                            index={index}
+                            isCurrentlyPlaying={isCurrentlyPlaying}
+                            onPlayTrack={() => onPlay(tracks, index)}
+                            onAddToQueue={onAddToQueue}
+                            onShowAddToPlaylist={handleShowAddToPlaylist}
+                            onDelete={onDelete}
+                        />
+                    );
+                })}
             </div>
 
             <PlaylistSelector

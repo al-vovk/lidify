@@ -5,6 +5,7 @@ import { Calendar, Clock, Download, Music2, Disc, ArrowRight, CheckCircle2, Load
 import { cn } from "@/utils/cn";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import Link from "next/link";
+import Image from "next/image";
 
 interface ReleaseItem {
     id: number | string;
@@ -216,10 +217,13 @@ function ReleaseCard({
             {/* Cover Art */}
             <div className="aspect-square rounded-lg overflow-hidden bg-white/5 mb-3 relative">
                 {release.coverUrl ? (
-                    <img
+                    <Image
                         src={release.coverUrl}
                         alt={release.title}
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                        fill
+                        sizes="(max-width: 640px) 50vw, (max-width: 768px) 33vw, (max-width: 1024px) 25vw, (max-width: 1280px) 20vw, 16vw"
+                        className="object-cover group-hover:scale-105 transition-transform duration-300"
+                        unoptimized
                     />
                 ) : (
                     <div className="w-full h-full flex items-center justify-center">

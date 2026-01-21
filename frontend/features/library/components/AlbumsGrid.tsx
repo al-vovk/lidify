@@ -5,7 +5,6 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { Disc3, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
-import { VirtuosoGrid } from "react-virtuoso";
 
 interface AlbumsGridProps {
     albums: Album[];
@@ -47,7 +46,7 @@ const AlbumCardItem = memo(
                     href={`/album/${album.id}`}
                     coverArt={
                         album.coverArt ?
-                            api.getCoverArtUrl(album.coverArt, 300)
+                            api.getCoverArtUrl(album.coverArt, 200)
                         :   null
                     }
                     title={album.title}
@@ -102,20 +101,19 @@ const AlbumsGrid = memo(function AlbumsGrid({
     }
 
     return (
-        <div data-tv-section="library-albums" className="h-full min-h-[400px]">
-            <VirtuosoGrid
-                useWindowScroll
-                data={albums}
-                listClassName="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-4"
-                itemContent={(index, album) => (
-                    <AlbumCardItem
-                        album={album}
-                        index={index}
-                        onPlay={onPlay}
-                        onDelete={onDelete}
-                    />
-                )}
-            />
+        <div
+            data-tv-section="library-albums"
+            className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-4"
+        >
+            {albums.map((album, index) => (
+                <AlbumCardItem
+                    key={album.id}
+                    album={album}
+                    index={index}
+                    onPlay={onPlay}
+                    onDelete={onDelete}
+                />
+            ))}
         </div>
     );
 });

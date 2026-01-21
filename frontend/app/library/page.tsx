@@ -8,9 +8,8 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Tab, DeleteDialogState } from "@/features/library/types";
 import {
     useLibraryArtistsQuery,
-    useLibraryArtistsInfiniteQuery,
-    useLibraryAlbumsInfiniteQuery,
-    useLibraryTracksInfiniteQuery,
+    useLibraryAlbumsQuery,
+    useLibraryTracksQuery,
     LibraryFilter,
     SortOption,
 } from "@/hooks/useQueries";
@@ -54,38 +53,41 @@ export default function LibraryPage() {
 
     // Use React Query hooks for cached data fetching
     // Only fetch data for active tab to prevent unnecessary API calls
-    const artistsQuery = useLibraryArtistsInfiniteQuery({
+    const artistsQuery = useLibraryArtistsQuery({
         filter,
         sortBy,
         limit: itemsPerPage,
+        page: currentPage,
         enabled: activeTab === "artists",
     });
 
-    const albumsQuery = useLibraryAlbumsInfiniteQuery({
+    const albumsQuery = useLibraryAlbumsQuery({
         filter,
         sortBy,
         limit: itemsPerPage,
+        page: currentPage,
         enabled: activeTab === "albums",
     });
 
-    const tracksQuery = useLibraryTracksInfiniteQuery({
+    const tracksQuery = useLibraryTracksQuery({
         sortBy,
         limit: itemsPerPage,
+        page: currentPage,
         enabled: activeTab === "tracks",
     });
 
     // Get data based on active tab
     const artists = useMemo(
-        () => (activeTab === "artists" ? (artistsQuery.data?.pages.flatMap(page => page.artists) ?? []) : []),
-        [activeTab, artistsQuery.data?.pages],
+        () => (activeTab === "artists" ? (artistsQuery.data?.artists ?? []) : []),
+        [activeTab, artistsQuery.data?.artists],
     );
     const albums = useMemo(
-        () => (activeTab === "albums" ? (albumsQuery.data?.pages.flatMap(page => page.albums) ?? []) : []),
-        [activeTab, albumsQuery.data?.pages],
+        () => (activeTab === "albums" ? (albumsQuery.data?.albums ?? []) : []),
+        [activeTab, albumsQuery.data?.albums],
     );
     const tracks = useMemo(
-        () => (activeTab === "tracks" ? (tracksQuery.data?.pages.flatMap(page => page.tracks) ?? []) : []),
-        [activeTab, tracksQuery.data?.pages],
+        () => (activeTab === "tracks" ? (tracksQuery.data?.tracks ?? []) : []),
+        [activeTab, tracksQuery.data?.tracks],
     );
 
     // Loading state based on active tab
@@ -97,15 +99,15 @@ export default function LibraryPage() {
     // Pagination from active query
     const pagination = useMemo(
         () => {
-            // Get the total from the first page of data
-            const total = 
-                activeTab === "artists" ? (artistsQuery.data?.pages[0]?.total ?? 0)
-                : activeTab === "albums" ? (albumsQuery.data?.pages[0]?.total ?? 0)
-                : (tracksQuery.data?.pages[0]?.total ?? 0);
-            
+            // Get the total from the query data
+            const total =
+                activeTab === "artists" ? (artistsQuery.data?.total ?? 0)
+                : activeTab === "albums" ? (albumsQuery.data?.total ?? 0)
+                : (tracksQuery.data?.total ?? 0);
+
             return {
                 total,
-                offset: 0, // offset is not used with infinite query
+                offset: 0,
                 limit: itemsPerPage,
                 totalPages: Math.ceil(total / itemsPerPage),
                 currentPage,

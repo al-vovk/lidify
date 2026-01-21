@@ -1,33 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
-import { api } from "@/lib/api";
-import { useAuth } from "@/lib/auth-context";
+import Image from "next/image";
+import { useLibraryArtistsQuery } from "@/hooks/useQueries";
 import { Music } from "lucide-react";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
+import { api } from "@/lib/api";
 
 export default function ArtistsPage() {
-    const { isAuthenticated } = useAuth();
-    const [artists, setArtists] = useState<any[]>([]);
-    const [isLoading, setIsLoading] = useState(true);
-
-    useEffect(() => {
-        const loadArtists = async () => {
-            if (!isAuthenticated) return;
-
-            try {
-                const data = await api.getArtists({ limit: 200 });
-                setArtists(data.artists);
-            } catch (error) {
-                console.error("Failed to load artists:", error);
-            } finally {
-                setIsLoading(false);
-            }
-        };
-
-        loadArtists();
-    }, [isAuthenticated]);
+    const { data, isLoading } = useLibraryArtistsQuery({ limit: 200 });
+    const artists = data?.artists ?? [];
 
     if (isLoading) {
         return (
@@ -68,15 +50,18 @@ export default function ArtistsPage() {
                     {artists.map((artist) => (
                         <Link key={artist.id} href={`/artist/${artist.mbid || artist.id}`}>
                             <div className="bg-gradient-to-br from-[#121212] to-[#121212] hover:from-[#181818] hover:to-[#1a1a1a] transition-all duration-300 p-4 rounded-lg group cursor-pointer border border-white/5 hover:border-white/10 hover:scale-105 hover:shadow-2xl">
-                                <div className="aspect-square bg-[#181818] rounded-full mb-4 flex items-center justify-center overflow-hidden shadow-lg">
+                                <div className="relative aspect-square bg-[#181818] rounded-full mb-4 flex items-center justify-center overflow-hidden shadow-lg">
                                     {artist.coverArt ? (
-                                        <img
+                                        <Image
                                             src={api.getCoverArtUrl(
                                                 artist.coverArt,
                                                 300
                                             )}
                                             alt={artist.name}
-                                            className="w-full h-full object-cover group-hover:scale-110 transition-all"
+                                            fill
+                                            sizes="(max-width: 640px) 50vw, (max-width: 768px) 33vw, (max-width: 1024px) 25vw, (max-width: 1280px) 20vw, 16vw"
+                                            className="object-cover group-hover:scale-110 transition-all"
+                                            unoptimized
                                         />
                                     ) : (
                                         <Music className="w-12 h-12 text-gray-600" />

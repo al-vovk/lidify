@@ -19,12 +19,21 @@ export function invalidateSystemSettingsCache() {
  * Safely decrypt a field, returning null if decryption fails
  * This prevents one corrupted encrypted field from breaking all settings
  */
+// Track logged warnings to prevent spam
+const loggedDecryptionWarnings = new Set<string>();
+
 function safeDecrypt(value: string | null, fieldName?: string): string | null {
     if (!value) return null;
     try {
         return decrypt(value);
     } catch (error) {
-        logger.warn(`[Settings] Failed to decrypt ${fieldName || 'field'}, returning null`);
+        const key = fieldName || "field";
+        if (!loggedDecryptionWarnings.has(key)) {
+            logger.warn(
+                `[Settings] Failed to decrypt ${key}, returning null (suppressing further warnings for this field)`,
+            );
+            loggedDecryptionWarnings.add(key);
+        }
         return null;
     }
 }
@@ -48,13 +57,22 @@ export async function getSystemSettings(forceRefresh = false) {
     // Decrypt sensitive fields - use safeDecrypt to handle corrupted fields gracefully
     const decrypted = {
         ...settings,
-        lidarrApiKey: safeDecrypt(settings.lidarrApiKey, 'lidarrApiKey'),
-        lidarrWebhookSecret: safeDecrypt(settings.lidarrWebhookSecret, 'lidarrWebhookSecret'),
-        openaiApiKey: safeDecrypt(settings.openaiApiKey, 'openaiApiKey'),
-        lastfmApiKey: safeDecrypt(settings.lastfmApiKey, 'lastfmApiKey'),
-        fanartApiKey: safeDecrypt(settings.fanartApiKey, 'fanartApiKey'),
-        audiobookshelfApiKey: safeDecrypt(settings.audiobookshelfApiKey, 'audiobookshelfApiKey'),
-        soulseekPassword: safeDecrypt(settings.soulseekPassword, 'soulseekPassword'),
+        lidarrApiKey: safeDecrypt(settings.lidarrApiKey, "lidarrApiKey"),
+        lidarrWebhookSecret: safeDecrypt(
+            settings.lidarrWebhookSecret,
+            "lidarrWebhookSecret",
+        ),
+        openaiApiKey: safeDecrypt(settings.openaiApiKey, "openaiApiKey"),
+        lastfmApiKey: safeDecrypt(settings.lastfmApiKey, "lastfmApiKey"),
+        fanartApiKey: safeDecrypt(settings.fanartApiKey, "fanartApiKey"),
+        audiobookshelfApiKey: safeDecrypt(
+            settings.audiobookshelfApiKey,
+            "audiobookshelfApiKey",
+        ),
+        soulseekPassword: safeDecrypt(
+            settings.soulseekPassword,
+            "soulseekPassword",
+        ),
     };
 
     cachedSettings = decrypted;

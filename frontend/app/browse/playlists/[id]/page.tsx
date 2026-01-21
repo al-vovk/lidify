@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
+import Image from "next/image";
 import {
     ArrowLeft,
     Play,
@@ -251,12 +252,15 @@ export default function DeezerPlaylistDetailPage() {
             <div className="relative bg-gradient-to-b from-[#AD47FF]/20 via-[#1a1a1a] to-transparent pt-16 pb-10 px-4 md:px-8">
                 <div className="flex items-end gap-6">
                     {/* Cover Art */}
-                    <div className="w-[140px] h-[140px] md:w-[192px] md:h-[192px] bg-[#282828] rounded shadow-2xl shrink-0 overflow-hidden">
+                    <div className="relative w-[140px] h-[140px] md:w-[192px] md:h-[192px] bg-[#282828] rounded shadow-2xl shrink-0 overflow-hidden">
                         {playlist.imageUrl ? (
-                            <img
+                            <Image
                                 src={playlist.imageUrl}
                                 alt={playlist.title}
-                                className="w-full h-full object-cover"
+                                fill
+                                sizes="(max-width: 768px) 140px, 192px"
+                                className="object-cover"
+                                unoptimized
                             />
                         ) : (
                             <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-[#AD47FF]/30 to-[#AD47FF]/10">
@@ -417,12 +421,15 @@ export default function DeezerPlaylistDetailPage() {
 
                                         {/* Title + Artist */}
                                         <div className="flex items-center gap-3 min-w-0">
-                                            <div className="w-10 h-10 bg-[#282828] rounded shrink-0 overflow-hidden">
+                                            <div className="relative w-10 h-10 bg-[#282828] rounded shrink-0 overflow-hidden">
                                                 {track.coverUrl ? (
-                                                    <img
+                                                    <Image
                                                         src={track.coverUrl}
                                                         alt={track.title}
-                                                        className="w-full h-full object-cover"
+                                                        fill
+                                                        sizes="40px"
+                                                        className="object-cover"
+                                                        unoptimized
                                                     />
                                                 ) : (
                                                     <div className="w-full h-full flex items-center justify-center">

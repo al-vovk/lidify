@@ -17,7 +17,6 @@ import {
     PlayerMode,
 } from "./audio-state-context";
 import { useAudioPlayback } from "./audio-playback-context";
-import { preloadImages } from "@/utils/imageCache";
 import { api } from "@/lib/api";
 import { audioSeekEmitter } from "./audio-seek-emitter";
 
@@ -259,16 +258,6 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             state.setShuffleIndices(
                 generateShuffleIndices(tracks.length, startIndex)
             );
-
-            // Preload cover art
-            const coverUrls = tracks
-                .map((t) =>
-                    t.album?.coverArt
-                        ? api.getCoverArtUrl(t.album.coverArt, 100)
-                        : null
-                )
-                .filter(Boolean) as string[];
-            preloadImages(coverUrls).catch(() => {});
         },
         [state, playback, generateShuffleIndices]
     );

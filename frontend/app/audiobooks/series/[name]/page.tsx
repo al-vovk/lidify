@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
@@ -115,13 +116,16 @@ export default function SeriesDetailPage() {
                 <div className="max-w-7xl mx-auto px-8 py-12">
                     <div className="flex flex-col md:flex-row gap-8 items-start">
                         {/* Series Cover */}
-                        <div className="w-64 h-64 flex-shrink-0 rounded-lg overflow-hidden shadow-2xl bg-[#181818]">
+                        <div className="relative w-64 h-64 flex-shrink-0 rounded-lg overflow-hidden shadow-2xl bg-[#181818]">
                             {firstBook.coverUrl &&
                             getCoverUrl(firstBook.coverUrl, 500) ? (
-                                <img
+                                <Image
                                     src={getCoverUrl(firstBook.coverUrl, 500)!}
                                     alt={seriesName}
-                                    className="w-full h-full object-cover"
+                                    fill
+                                    sizes="256px"
+                                    className="object-cover"
+                                    unoptimized
                                 />
                             ) : (
                                 <div className="w-full h-full flex items-center justify-center">
@@ -213,18 +217,16 @@ export default function SeriesDetailPage() {
 
                                     {/* Book Cover (small) */}
                                     <Link href={`/audiobooks/${book.id}`}>
-                                        <div className="w-12 h-12 rounded overflow-hidden bg-[#181818] flex-shrink-0 cursor-pointer">
+                                        <div className="relative w-12 h-12 rounded overflow-hidden bg-[#181818] flex-shrink-0 cursor-pointer">
                                             {book.coverUrl &&
                                             getCoverUrl(book.coverUrl, 100) ? (
-                                                <img
-                                                    src={
-                                                        getCoverUrl(
-                                                            book.coverUrl,
-                                                            100
-                                                        )!
-                                                    }
+                                                <Image
+                                                    src={getCoverUrl(book.coverUrl, 100)!}
                                                     alt={book.title}
-                                                    className="w-full h-full object-cover"
+                                                    fill
+                                                    sizes="48px"
+                                                    className="object-cover"
+                                                    unoptimized
                                                 />
                                             ) : (
                                                 <div className="w-full h-full flex items-center justify-center">

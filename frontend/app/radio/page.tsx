@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Radio, Play, Loader2, Shuffle, ChevronLeft } from "lucide-react";
 import Link from "next/link";
 import { api } from "@/lib/api";
@@ -194,7 +195,7 @@ function RadioStationCard({
                     <Loader2 className="w-8 h-8 text-white animate-spin" />
                 ) : (
                     <div className="w-12 h-12 rounded-full bg-brand flex items-center justify-center shadow-lg">
-                        <Play className="w-5 h-5 text-black ml-0.5" fill="currentColor" />
+                        <Play className="w-5 h-5 fill-current text-black ml-0.5" />
                     </div>
                 )}
             </div>
@@ -215,34 +216,26 @@ function SectionHeader({ title, description }: { title: string; description?: st
 export default function RadioPage() {
     const { playTracks } = useAudioControls();
     const [loadingStation, setLoadingStation] = useState<string | null>(null);
-    const [genres, setGenres] = useState<GenreCount[]>([]);
-    const [decades, setDecades] = useState<DecadeCount[]>([]);
-    const [isLoading, setIsLoading] = useState(true);
 
-    // Fetch available genres and decades from library
-    useEffect(() => {
-        const fetchData = async () => {
-            try {
-                const [genresRes, decadesRes] = await Promise.all([
-                    api.get<{ genres: GenreCount[] }>("/library/genres"),
-                    api.get<{ decades: DecadeCount[] }>("/library/decades"),
-                ]);
-                
-                // Filter to genres with enough tracks (at least 15)
-                const validGenres = (genresRes.genres || []).filter((g) => g.count >= 15);
-                setGenres(validGenres);
-                
-                // Decades already filtered by backend (15+ tracks)
-                setDecades(decadesRes.decades || []);
-            } catch (error) {
-                console.error("Failed to fetch radio data:", error);
-            } finally {
-                setIsLoading(false);
-            }
-        };
+    // Fetch genres from library
+    const { data: genresData, isLoading: genresLoading } = useQuery({
+        queryKey: ["library", "genres"],
+        queryFn: () => api.get<{ genres: GenreCount[] }>("/library/genres"),
+        staleTime: 5 * 60 * 1000,
+        select: (data) => (data.genres || []).filter((g) => g.count >= 15),
+    });
 
-        fetchData();
-    }, []);
+    // Fetch decades from library
+    const { data: decadesData, isLoading: decadesLoading } = useQuery({
+        queryKey: ["library", "decades"],
+        queryFn: () => api.get<{ decades: DecadeCount[] }>("/library/decades"),
+        staleTime: 5 * 60 * 1000,
+        select: (data) => data.decades || [],
+    });
+
+    const genres = genresData ?? [];
+    const decades = decadesData ?? [];
+    const isLoading = genresLoading || decadesLoading;
 
     const startRadio = async (station: RadioStation) => {
         setLoadingStation(station.id);

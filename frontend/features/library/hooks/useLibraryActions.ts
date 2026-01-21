@@ -1,3 +1,4 @@
+import { useCallback, useMemo } from "react";
 import { api } from "@/lib/api";
 import { useAudio } from "@/lib/audio-context";
 import { Track } from "../types";
@@ -21,7 +22,7 @@ const formatTrackForAudio = (track: Track) => ({
 export function useLibraryActions() {
     const { playTrack, playTracks, addToQueue } = useAudio();
 
-    const playArtist = async (artistId: string) => {
+    const playArtist = useCallback(async (artistId: string) => {
         try {
             const albumsData = await api.getAlbums({ artistId });
             if (!albumsData.albums || albumsData.albums.length === 0) {
@@ -54,9 +55,9 @@ export function useLibraryActions() {
         } catch (error) {
             console.error("Error playing artist:", error);
         }
-    };
+    }, [playTracks]);
 
-    const playAlbum = async (albumId: string) => {
+    const playAlbum = useCallback(async (albumId: string) => {
         try {
             const album = await api.getAlbum(albumId);
             if (!album || !album.tracks || album.tracks.length === 0) {
@@ -80,60 +81,60 @@ export function useLibraryActions() {
         } catch (error) {
             console.error("Error playing album:", error);
         }
-    };
+    }, [playTracks]);
 
-    const playTrackAction = (track: Track) => {
+    const playTrackAction = useCallback((track: Track) => {
         try {
             playTrack(formatTrackForAudio(track));
         } catch (error) {
             console.error("Error playing track:", error);
         }
-    };
+    }, [playTrack]);
 
-    const addTrackToQueue = (track: Track) => {
+    const addTrackToQueue = useCallback((track: Track) => {
         try {
             addToQueue(formatTrackForAudio(track));
         } catch (error) {
             console.error("Error adding track to queue:", error);
         }
-    };
+    }, [addToQueue]);
 
-    const addTrackToPlaylist = async (playlistId: string, trackId: string) => {
+    const addTrackToPlaylist = useCallback(async (playlistId: string, trackId: string) => {
         try {
             await api.addTrackToPlaylist(playlistId, trackId);
         } catch (error) {
             console.error("Error adding track to playlist:", error);
         }
-    };
+    }, []);
 
-    const deleteTrack = async (id: string): Promise<void> => {
+    const deleteTrack = useCallback(async (id: string): Promise<void> => {
         try {
             await api.deleteTrack(id);
         } catch (error) {
             console.error("Error deleting track:", error);
             throw error;
         }
-    };
+    }, []);
 
-    const deleteAlbum = async (id: string): Promise<void> => {
+    const deleteAlbum = useCallback(async (id: string): Promise<void> => {
         try {
             await api.deleteAlbum(id);
         } catch (error) {
             console.error("Error deleting album:", error);
             throw error;
         }
-    };
+    }, []);
 
-    const deleteArtist = async (id: string): Promise<void> => {
+    const deleteArtist = useCallback(async (id: string): Promise<void> => {
         try {
             await api.deleteArtist(id);
         } catch (error) {
             console.error("Error deleting artist:", error);
             throw error;
         }
-    };
+    }, []);
 
-    return {
+    return useMemo(() => ({
         playArtist,
         playAlbum,
         playTrack: playTrackAction,
@@ -142,5 +143,14 @@ export function useLibraryActions() {
         deleteTrack,
         deleteAlbum,
         deleteArtist,
-    };
+    }), [
+        playArtist,
+        playAlbum,
+        playTrackAction,
+        addTrackToQueue,
+        addTrackToPlaylist,
+        deleteTrack,
+        deleteAlbum,
+        deleteArtist,
+    ]);
 }

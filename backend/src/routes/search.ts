@@ -2,7 +2,6 @@ import { Router } from "express";
 import { logger } from "../utils/logger";
 import { requireAuth } from "../middleware/auth";
 import { prisma } from "../utils/db";
-import { audiobookshelfService } from "../services/audiobookshelf";
 import { lastFmService } from "../services/lastfm";
 import { searchService } from "../services/search";
 import axios from "axios";
@@ -99,97 +98,58 @@ router.get("/", async (req, res) => {
                 tracks: [],
                 audiobooks: [],
                 podcasts: [],
+                episodes: [],
             });
         }
 
-        // Check cache for library search (short TTL since library can change)
-        const cacheKey = `search:library:${type}:${
-            genre || ""
-        }:${query}:${searchLimit}`;
-        try {
-            const cached = await redisClient.get(cacheKey);
-            if (cached) {
-                logger.debug(`[SEARCH] Cache hit for query="${query}"`);
-                return res.json(JSON.parse(cached));
-            }
-        } catch (err) {
-            // Redis errors are non-critical
-        }
-
-        const results: any = {
-            artists: [],
-            albums: [],
-            tracks: [],
-            audiobooks: [],
-            podcasts: [],
-            episodes: [],
-        };
-
-        // Search artists using full-text search (only show artists with actual albums in library)
-        if (type === "all" || type === "artists") {
-            const artistResults = await searchService.searchArtists({
+        // Delegate to service (handles caching + parallel execution)
+        if (type === "all") {
+            const serviceResults = await searchService.searchAll({
                 query,
                 limit: searchLimit,
             });
 
-            // Filter to only include artists with albums
-            const artistIds = artistResults.map((a) => a.id);
-            const artistsWithAlbums = await prisma.artist.findMany({
-                where: {
-                    id: { in: artistIds },
-                    albums: {
-                        some: {},
+            // Transform results to API format
+            const results = {
+                artists: serviceResults.artists,
+                albums: serviceResults.albums.map((album) => ({
+                    id: album.id,
+                    title: album.title,
+                    artistId: album.artistId,
+                    year: album.year,
+                    coverUrl: album.coverUrl,
+                    artist: {
+                        id: album.artistId,
+                        name: album.artistName,
+                        mbid: "",
                     },
-                },
-                select: {
-                    id: true,
-                    mbid: true,
-                    name: true,
-                    heroUrl: true,
-                    summary: true,
-                },
-            });
+                })),
+                tracks: serviceResults.tracks.map((track) => ({
+                    id: track.id,
+                    title: track.title,
+                    albumId: track.albumId,
+                    duration: track.duration,
+                    trackNo: 0,
+                    album: {
+                        id: track.albumId,
+                        title: track.albumTitle,
+                        artistId: track.artistId,
+                        coverUrl: null,
+                        artist: {
+                            id: track.artistId,
+                            name: track.artistName,
+                            mbid: "",
+                        },
+                    },
+                })),
+                audiobooks: serviceResults.audiobooks,
+                podcasts: serviceResults.podcasts,
+                episodes: serviceResults.episodes,
+            };
 
-            // Preserve rank order from full-text search
-            const rankMap = new Map(artistResults.map((a) => [a.id, a.rank]));
-            results.artists = artistsWithAlbums.sort((a, b) => {
-                const rankA = rankMap.get(a.id) || 0;
-                const rankB = rankMap.get(b.id) || 0;
-                return rankB - rankA; // Sort by rank DESC
-            });
-        }
-
-        // Search albums using full-text search
-        if (type === "all" || type === "albums") {
-            const albumResults = await searchService.searchAlbums({
-                query,
-                limit: searchLimit,
-            });
-
-            results.albums = albumResults.map((album) => ({
-                id: album.id,
-                title: album.title,
-                artistId: album.artistId,
-                year: album.year,
-                coverUrl: album.coverUrl,
-                artist: {
-                    id: album.artistId,
-                    name: album.artistName,
-                    mbid: "", // Not included in search result
-                },
-            }));
-        }
-
-        // Search tracks using full-text search
-        if (type === "all" || type === "tracks") {
-            const trackResults = await searchService.searchTracks({
-                query,
-                limit: searchLimit,
-            });
-
-            // If genre filter is applied, filter the results
-            if (genre) {
-                const trackIds = trackResults.map((t) => t.id);
+            // Apply genre filter to tracks if specified
+            if (genre && results.tracks.length > 0) {
+                const trackIds = results.tracks.map((t) => t.id);
                 const tracksWithGenre = await prisma.track.findMany({
                     where: {
                         id: { in: trackIds },
@@ -206,98 +166,60 @@ router.get("/", async (req, res) => {
                     },
                     select: { id: true },
                 });
-
                 const genreTrackIds = new Set(tracksWithGenre.map((t) => t.id));
-                results.tracks = trackResults
-                    .filter((t) => genreTrackIds.has(t.id))
-                    .map((track) => ({
-                        id: track.id,
-                        title: track.title,
-                        albumId: track.albumId,
-                        duration: track.duration,
-                        trackNo: 0, // Not included in search result
-                        album: {
-                            id: track.albumId,
-                            title: track.albumTitle,
-                            artistId: track.artistId,
-                            coverUrl: null, // Not included in search result
-                            artist: {
-                                id: track.artistId,
-                                name: track.artistName,
-                                mbid: "", // Not included in search result
-                            },
-                        },
-                    }));
-            } else {
-                results.tracks = trackResults.map((track) => ({
-                    id: track.id,
-                    title: track.title,
-                    albumId: track.albumId,
-                    duration: track.duration,
-                    trackNo: 0, // Not included in search result
-                    album: {
-                        id: track.albumId,
-                        title: track.albumTitle,
-                        artistId: track.artistId,
-                        coverUrl: null, // Not included in search result
-                        artist: {
-                            id: track.artistId,
-                            name: track.artistName,
-                            mbid: "", // Not included in search result
-                        },
+                results.tracks = results.tracks.filter((t) =>
+                    genreTrackIds.has(t.id)
+                );
+            }
+
+            return res.json(results);
+        }
+
+        // Single-type search (service handles caching)
+        const serviceResults = await searchService.searchByType({
+            query,
+            type: type as string,
+            limit: searchLimit,
+            genre: genre as string | undefined,
+        });
+
+        // Transform to API format based on type
+        const results: any = {
+            artists: serviceResults.artists,
+            albums: serviceResults.albums.map((album) => ({
+                id: album.id,
+                title: album.title,
+                artistId: album.artistId,
+                year: album.year,
+                coverUrl: album.coverUrl,
+                artist: {
+                    id: album.artistId,
+                    name: album.artistName,
+                    mbid: "",
+                },
+            })),
+            tracks: serviceResults.tracks.map((track) => ({
+                id: track.id,
+                title: track.title,
+                albumId: track.albumId,
+                duration: track.duration,
+                trackNo: 0,
+                album: {
+                    id: track.albumId,
+                    title: track.albumTitle,
+                    artistId: track.artistId,
+                    coverUrl: null,
+                    artist: {
+                        id: track.artistId,
+                        name: track.artistName,
+                        mbid: "",
                     },
-                }));
-            }
-        }
-
-        // Search audiobooks using FTS
-        if (type === "all" || type === "audiobooks") {
-            try {
-                const audiobooks = await searchService.searchAudiobooksFTS({
-                    query,
-                    limit: searchLimit,
-                });
-                results.audiobooks = audiobooks;
-            } catch (error) {
-                logger.error("Audiobook search error:", error);
-                results.audiobooks = [];
-            }
-        }
-
-        // Search podcasts using FTS
-        if (type === "all" || type === "podcasts") {
-            try {
-                const podcasts = await searchService.searchPodcastsFTS({
-                    query,
-                    limit: searchLimit,
-                });
-                results.podcasts = podcasts;
-            } catch (error) {
-                logger.error("Podcast search error:", error);
-                results.podcasts = [];
-            }
-        }
-
-        // Search podcast episodes
-        if (type === "all" || type === "episodes") {
-            try {
-                const episodes = await searchService.searchEpisodes({
-                    query,
-                    limit: searchLimit,
-                });
-                results.episodes = episodes;
-            } catch (error) {
-                logger.error("Episode search error:", error);
-                results.episodes = [];
-            }
-        }
-
-        // Cache search results for 2 minutes (library can change)
-        try {
-            await redisClient.setEx(cacheKey, 120, JSON.stringify(results));
-        } catch (err) {
-            // Redis errors are non-critical
-        }
+                },
+            })),
+            audiobooks: serviceResults.audiobooks,
+            podcasts: serviceResults.podcasts,
+            episodes: serviceResults.episodes,
+        };
 
         res.json(results);
     } catch (error) {

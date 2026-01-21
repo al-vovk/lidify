@@ -38,6 +38,8 @@ let isPaused = false;
 let isStopping = false;
 let immediateEnrichmentRequested = false;
 let consecutiveSystemFailures = 0; // Track consecutive system-level failures
+let lastRunTime = 0;
+const MIN_INTERVAL_MS = 10000; // Minimum 10s between cycles
 
 // Batch failure tracking
 interface BatchFailures {
@@ -132,7 +134,7 @@ const MOOD_TAGS = new Set([
 async function withTimeout<T>(
     promise: Promise<T>,
     timeoutMs: number,
-    errorMessage: string
+    errorMessage: string,
 ): Promise<T> {
     const timeoutPromise = new Promise<never>((_, reject) => {
         setTimeout(() => reject(new Error(errorMessage)), timeoutMs);
@@ -177,7 +179,7 @@ async function setupControlChannel() {
         controlSubscriber.on("message", (channel, message) => {
             if (channel === "enrichment:control") {
                 logger.debug(
-                    `[Enrichment] Received control message: ${message}`
+                    `[Enrichment] Received control message: ${message}`,
                 );
 
                 if (message === "pause") {
@@ -190,7 +192,7 @@ async function setupControlChannel() {
                     isStopping = true;
                     isPaused = true;
                     logger.debug(
-                        "[Enrichment] Stopping gracefully - completing current item..."
+                        "[Enrichment] Stopping gracefully - completing current item...",
                     );
                     // DO NOT override state - let enrichmentStateService.stop() handle it
                 }
@@ -251,7 +253,7 @@ export function stopUnifiedEnrichmentWorker() {
             currentPhase: null,
         })
         .catch((err) =>
-            logger.error("[Enrichment] Failed to update state:", err)
+            logger.error("[Enrichment] Failed to update state:", err),
         );
 }
 
@@ -350,7 +352,7 @@ export async function resetAudioAnalysisOnly(): Promise<{ count: number }> {
     });
 
     logger.debug(
-        `[Enrichment] Reset audio analysis for ${result.count} tracks`
+        `[Enrichment] Reset audio analysis for ${result.count} tracks`,
     );
     return { count: result.count };
 }
@@ -391,8 +393,19 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
         return { artists: 0, tracks: 0, audioQueued: 0 };
     }
 
+    // Enforce minimum interval between cycles (unless full mode or immediate request)
+    const now = Date.now();
+    if (
+        !fullMode &&
+        !immediateEnrichmentRequested &&
+        now - lastRunTime < MIN_INTERVAL_MS
+    ) {
+        return { artists: 0, tracks: 0, audioQueued: 0 };
+    }
+
     // Clear the immediate request flag
     immediateEnrichmentRequested = false;
+    lastRunTime = now;
 
     isRunning = true;
     let artistsProcessed = 0;
@@ -473,7 +486,7 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
             await audioAnalysisCleanupService.cleanupStaleProcessing();
         if (cleanupResult.reset > 0 || cleanupResult.permanentlyFailed > 0) {
             logger.debug(
-                `[Enrichment] Audio analysis cleanup: ${cleanupResult.reset} reset, ${cleanupResult.permanentlyFailed} permanently failed`
+                `[Enrichment] Audio analysis cleanup: ${cleanupResult.reset} reset, ${cleanupResult.permanentlyFailed} permanently failed`,
             );
         }
 
@@ -488,7 +501,7 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
         // Check circuit breaker before queuing new tracks
         if (audioAnalysisCleanupService.isCircuitOpen()) {
             logger.warn(
-                "[Enrichment] Audio analysis circuit breaker OPEN - skipping queue"
+                "[Enrichment] Audio analysis circuit breaker OPEN - skipping queue",
             );
             audioQueued = 0;
         } else {
@@ -515,13 +528,13 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
             const progress = await getEnrichmentProgress();
             logger.debug(`\n[Enrichment Progress]`);
             logger.debug(
-                `   Artists: ${progress.artists.completed}/${progress.artists.total} (${progress.artists.progress}%)`
+                `   Artists: ${progress.artists.completed}/${progress.artists.total} (${progress.artists.progress}%)`,
             );
             logger.debug(
-                `   Track Tags: ${progress.trackTags.enriched}/${progress.trackTags.total} (${progress.trackTags.progress}%)`
+                `   Track Tags: ${progress.trackTags.enriched}/${progress.trackTags.total} (${progress.trackTags.progress}%)`,
             );
             logger.debug(
-                `   Audio Analysis: ${progress.audioAnalysis.completed}/${progress.audioAnalysis.total} (${progress.audioAnalysis.progress}%) [background]`
+                `   Audio Analysis: ${progress.audioAnalysis.completed}/${progress.audioAnalysis.total} (${progress.audioAnalysis.progress}%) [background]`,
             );
             logger.debug("");
 
@@ -558,9 +571,8 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
                 const failureCounts =
                     await enrichmentFailureService.getFailureCounts();
 
-                const { notificationService } = await import(
-                    "../services/notificationService"
-                );
+                const { notificationService } =
+                    await import("../services/notificationService");
                 const users = await prisma.user.findMany({
                     select: { id: true },
                 });
@@ -579,12 +591,12 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
                 }
 
                 logger.debug(
-                    `[Enrichment] Failure notification sent: ${totalFailures} failures in batch`
+                    `[Enrichment] Failure notification sent: ${totalFailures} failures in batch`,
                 );
             } catch (error) {
                 logger.error(
                     "[Enrichment] Failed to send failure notification:",
-                    error
+                    error,
                 );
             }
 
@@ -604,9 +616,8 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
             const state = await enrichmentStateService.getState();
             if (!state?.completionNotificationSent) {
                 try {
-                    const { notificationService } = await import(
-                        "../services/notificationService"
-                    );
+                    const { notificationService } =
+                        await import("../services/notificationService");
                     // Get all users to notify (in a multi-user system, notify everyone)
                     const users = await prisma.user.findMany({
                         select: { id: true },
@@ -615,7 +626,7 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
                         await notificationService.notifySystem(
                             user.id,
                             "Enrichment Complete",
-                            `Enriched ${progress.artists.completed} artists, ${progress.trackTags.enriched} tracks, ${progress.audioAnalysis.completed} audio analyses`
+                            `Enriched ${progress.artists.completed} artists, ${progress.trackTags.enriched} tracks, ${progress.audioAnalysis.completed} audio analyses`,
                         );
                     }
 
@@ -627,12 +638,12 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
                 } catch (error) {
                     logger.error(
                         "[Enrichment] Failed to send completion notification:",
-                        error
+                        error,
                     );
                 }
             } else {
                 logger.debug(
-                    "[Enrichment] Completion notification already sent, skipping"
+                    "[Enrichment] Completion notification already sent, skipping",
                 );
             }
         }
@@ -656,12 +667,12 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
                     errorCode: "SYSTEM_ERROR",
                 })
                 .catch((err) =>
-                    logger.error("[Enrichment] Failed to record failure:", err)
+                    logger.error("[Enrichment] Failed to record failure:", err),
                 );
         } else {
             logger.error(
                 `[Enrichment] Circuit breaker triggered - ${consecutiveSystemFailures} consecutive system failures. ` +
-                    `Suppressing further error recording to prevent infinite loop.`
+                    `Suppressing further error recording to prevent infinite loop.`,
             );
         }
     } finally {
@@ -694,7 +705,7 @@ async function enrichArtistsBatch(): Promise<number> {
     if (artists.length === 0) return 0;
 
     logger.debug(
-        `[Artists] Processing ${artists.length} artists (concurrency: ${concurrency})...`
+        `[Artists] Processing ${artists.length} artists (concurrency: ${concurrency})...`,
     );
 
     // Use p-limit to control concurrency
@@ -721,7 +732,7 @@ async function enrichArtistsBatch(): Promise<number> {
                     await withTimeout(
                         enrichSimilarArtist(artist),
                         60000, // 60 second max per artist
-                        `Timeout enriching artist: ${artist.name}`
+                        `Timeout enriching artist: ${artist.name}`,
                     );
                     logger.debug(`✓ ${artist.name}`);
                     return artist.name;
@@ -732,9 +743,9 @@ async function enrichArtistsBatch(): Promise<number> {
                     currentBatchFailures.artists.push({
                         name: artist.name,
                         error:
-                            error instanceof Error
-                                ? error.message
-                                : String(error),
+                            error instanceof Error ?
+                                error.message
+                            :   String(error),
                     });
 
                     // Record failure
@@ -743,22 +754,24 @@ async function enrichArtistsBatch(): Promise<number> {
                         entityId: artist.id,
                         entityName: artist.name,
                         errorMessage:
-                            error instanceof Error
-                                ? error.message
-                                : String(error),
+                            error instanceof Error ?
+                                error.message
+                            :   String(error),
                         errorCode:
-                            error instanceof Error &&
-                            error.message.includes("Timeout")
-                                ? "TIMEOUT_ERROR"
-                                : "ENRICHMENT_ERROR",
+                            (
+                                error instanceof Error &&
+                                error.message.includes("Timeout")
+                            ) ?
+                                "TIMEOUT_ERROR"
+                            :   "ENRICHMENT_ERROR",
                         metadata: {
                             mbid: artist.mbid,
                         },
                     });
                     throw error;
                 }
-            })
-        )
+            }),
+        ),
     );
 
     // Count successful enrichments
@@ -766,7 +779,7 @@ async function enrichArtistsBatch(): Promise<number> {
 
     if (processed > 0) {
         logger.debug(
-            `[Artists] Successfully enriched ${processed}/${artists.length} artists`
+            `[Artists] Successfully enriched ${processed}/${artists.length} artists`,
         );
     }
 
@@ -807,7 +820,7 @@ async function enrichTrackTagsBatch(): Promise<number> {
     if (tracks.length === 0) return 0;
 
     logger.debug(
-        `[Track Tags] Processing ${tracks.length} tracks (concurrency: ${concurrency})...`
+        `[Track Tags] Processing ${tracks.length} tracks (concurrency: ${concurrency})...`,
     );
 
     // Use p-limit to control concurrency
@@ -835,12 +848,12 @@ async function enrichTrackTagsBatch(): Promise<number> {
                     const trackInfo = await withTimeout(
                         lastFmService.getTrackInfo(artistName, track.title),
                         30000, // 30 second max per track
-                        `Timeout enriching track: ${track.title}`
+                        `Timeout enriching track: ${track.title}`,
                     );
 
                     if (trackInfo?.toptags?.tag) {
                         const allTags = trackInfo.toptags.tag.map(
-                            (t: any) => t.name
+                            (t: any) => t.name,
                         );
                         const moodTags = filterMoodTags(allTags);
 
@@ -848,9 +861,9 @@ async function enrichTrackTagsBatch(): Promise<number> {
                             where: { id: track.id },
                             data: {
                                 lastfmTags:
-                                    moodTags.length > 0
-                                        ? moodTags
-                                        : ["_no_mood_tags"],
+                                    moodTags.length > 0 ?
+                                        moodTags
+                                    :   ["_no_mood_tags"],
                             },
                         });
 
@@ -858,7 +871,7 @@ async function enrichTrackTagsBatch(): Promise<number> {
                             logger.debug(
                                 `   ✓ ${track.title}: [${moodTags
                                     .slice(0, 3)
-                                    .join(", ")}...]`
+                                    .join(", ")}...]`,
                             );
                         }
                     } else {
@@ -873,7 +886,7 @@ async function enrichTrackTagsBatch(): Promise<number> {
                     return track.title;
                 } catch (error: any) {
                     logger.error(
-                        `✗ ${track.title}: ${error?.message || error}`
+                        `✗ ${track.title}: ${error?.message || error}`,
                     );
 
                     // Collect failure for batch reporting
@@ -888,9 +901,10 @@ async function enrichTrackTagsBatch(): Promise<number> {
                         entityId: track.id,
                         entityName: `${track.album.artist.name} - ${track.title}`,
                         errorMessage: error?.message || String(error),
-                        errorCode: error?.message?.includes("Timeout")
-                            ? "TIMEOUT_ERROR"
-                            : "LASTFM_ERROR",
+                        errorCode:
+                            error?.message?.includes("Timeout") ?
+                                "TIMEOUT_ERROR"
+                            :   "LASTFM_ERROR",
                         metadata: {
                             albumId: track.albumId,
                             filePath: track.filePath,
@@ -898,8 +912,8 @@ async function enrichTrackTagsBatch(): Promise<number> {
                     });
                     throw error;
                 }
-            })
-        )
+            }),
+        ),
     );
 
     // Count successful enrichments
@@ -907,7 +921,7 @@ async function enrichTrackTagsBatch(): Promise<number> {
 
     if (processed > 0) {
         logger.debug(
-            `[Track Tags] Successfully enriched ${processed}/${tracks.length} tracks`
+            `[Track Tags] Successfully enriched ${processed}/${tracks.length} tracks`,
         );
     }
 
@@ -936,7 +950,7 @@ async function queueAudioAnalysis(): Promise<number> {
     if (tracks.length === 0) return 0;
 
     logger.debug(
-        `[Audio Analysis] Queueing ${tracks.length} tracks for Essentia...`
+        `[Audio Analysis] Queueing ${tracks.length} tracks for Essentia...`,
     );
 
     const redis = getRedis();
@@ -950,7 +964,7 @@ async function queueAudioAnalysis(): Promise<number> {
                 JSON.stringify({
                     trackId: track.id,
                     filePath: track.filePath,
-                })
+                }),
             );
 
             // Mark as queued (processing) with timestamp for timeout detection
@@ -1036,18 +1050,18 @@ export async function getEnrichmentProgress() {
                 artistCounts.find((s) => s.enrichmentStatus === "failed")
                     ?._count || 0,
             progress:
-                artistTotal > 0
-                    ? Math.round((artistCompleted / artistTotal) * 100)
-                    : 0,
+                artistTotal > 0 ?
+                    Math.round((artistCompleted / artistTotal) * 100)
+                :   0,
         },
         trackTags: {
             total: trackTotal,
             enriched: trackTagsEnriched,
             pending: trackTotal - trackTagsEnriched,
             progress:
-                trackTotal > 0
-                    ? Math.round((trackTagsEnriched / trackTotal) * 100)
-                    : 0,
+                trackTotal > 0 ?
+                    Math.round((trackTagsEnriched / trackTotal) * 100)
+                :   0,
         },
 
         // Background enrichment (non-blocking, runs in audio-analyzer container)
@@ -1058,9 +1072,9 @@ export async function getEnrichmentProgress() {
             processing: audioProcessing,
             failed: audioFailed,
             progress:
-                trackTotal > 0
-                    ? Math.round((audioCompleted / trackTotal) * 100)
-                    : 0,
+                trackTotal > 0 ?
+                    Math.round((audioCompleted / trackTotal) * 100)
+                :   0,
             isBackground: true, // Flag to indicate this runs separately
         },
 
@@ -1122,14 +1136,14 @@ export async function enrichAlbumTracksNow(albumId: string) {
     });
 
     logger.debug(
-        `[Enrichment] Enriching ${tracks.length} tracks for album ${albumId}`
+        `[Enrichment] Enriching ${tracks.length} tracks for album ${albumId}`,
     );
 
     for (const track of tracks) {
         try {
             const trackInfo = await lastFmService.getTrackInfo(
                 track.album.artist.name,
-                track.title
+                track.title,
             );
 
             if (trackInfo?.toptags?.tag) {

@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, ReactNode, memo } from "react";
+import { ReactNode, memo } from "react";
 import Link from "next/link";
-import Image from "next/image";
 import { Play, Pause, Check, Download } from "lucide-react";
 import { Card, CardProps } from "./Card";
 import { cn } from "@/utils/cn";
 import type { ColorPalette } from "@/hooks/useImageColor";
+import { CachedImage } from "./CachedImage";
 
 // Lidify brand yellow for all on-page play buttons
 const LIDIFY_YELLOW = "#ecb200";
@@ -48,8 +48,6 @@ const PlayableCard = memo(function PlayableCard({
     tvCardIndex,
     ...props
 }: PlayableCardProps) {
-    const [isHovered, setIsHovered] = useState(false);
-
     // Handle Link click to prevent navigation when clicking on interactive elements
     const handleLinkClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
         const target = e.target as HTMLElement;
@@ -61,33 +59,28 @@ const PlayableCard = memo(function PlayableCard({
     const cardContent = (
         <>
             {/* Image Container */}
-            <div
-                className="relative aspect-square mb-3"
-                onMouseEnter={() => setIsHovered(true)}
-                onMouseLeave={() => setIsHovered(false)}
-            >
+            <div className="relative aspect-square mb-3">
                 <div
                     className={cn(
                         "relative w-full h-full bg-[#282828] flex items-center justify-center overflow-hidden shadow-lg",
                         circular ? "rounded-full" : "rounded-md",
                     )}
+                    style={{ contain: "content" }}
                 >
                     {coverArt ?
-                        <Image
+                        <CachedImage
                             src={coverArt}
                             alt={title}
                             fill
+                            className="object-cover transition-transform duration-300 group-hover:scale-105"
+                            loading="lazy"
                             sizes="(max-width: 640px) 50vw, (max-width: 768px) 33vw, (max-width: 1024px) 25vw, (max-width: 1280px) 20vw, 16vw"
-                            className={cn(
-                                "object-cover transition-transform duration-300",
-                                isHovered && "scale-105",
-                            )}
-                            unoptimized
                         />
                     :   placeholderIcon || (
                             <div className="w-12 h-12 bg-[#3e3e3e] rounded-full" />
                         )
                     }
+                    <div className="absolute inset-0 bg-gradient-to-b from-black/0 to-black/30 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
                 </div>
 
                 {/* Play Button */}
@@ -103,9 +96,9 @@ const PlayableCard = memo(function PlayableCard({
                             "absolute bottom-2 right-2 w-10 h-10 rounded-full flex items-center justify-center",
                             "shadow-xl shadow-black/50 transition-all duration-200",
                             "hover:scale-105 hover:brightness-110",
-                            isHovered || isPlaying ?
-                                "opacity-100 translate-y-0"
-                            :   "opacity-0 translate-y-2",
+                            isPlaying
+                                ? "opacity-100 translate-y-0"
+                                : "opacity-0 translate-y-2 group-hover:opacity-100 group-hover:translate-y-0",
                         )}
                     >
                         {isPlaying ?

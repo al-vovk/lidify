@@ -8,15 +8,16 @@ interface SearchOptions {
     offset?: number;
 }
 
-interface ArtistSearchResult {
+export interface ArtistSearchResult {
     id: string;
     name: string;
     mbid: string;
     heroUrl: string | null;
+    summary?: string;
     rank: number;
 }
 
-interface AlbumSearchResult {
+export interface AlbumSearchResult {
     id: string;
     title: string;
     artistId: string;
@@ -26,7 +27,7 @@ interface AlbumSearchResult {
     rank: number;
 }
 
-interface TrackSearchResult {
+export interface TrackSearchResult {
     id: string;
     title: string;
     albumId: string;
@@ -37,7 +38,7 @@ interface TrackSearchResult {
     rank: number;
 }
 
-interface PodcastSearchResult {
+export interface PodcastSearchResult {
     id: string;
     title: string;
     author: string | null;
@@ -47,7 +48,7 @@ interface PodcastSearchResult {
     rank?: number;
 }
 
-interface EpisodeSearchResult {
+export interface EpisodeSearchResult {
     id: string;
     title: string;
     description: string | null;
@@ -59,7 +60,7 @@ interface EpisodeSearchResult {
     rank: number;
 }
 
-interface AudiobookSearchResult {
+export interface AudiobookSearchResult {
     id: string;
     title: string;
     author: string | null;
@@ -69,6 +70,23 @@ interface AudiobookSearchResult {
     coverUrl: string | null;
     duration: number | null;
     rank: number;
+}
+
+export interface SearchByTypeOptions {
+    query: string;
+    type: string;
+    limit?: number;
+    offset?: number;
+    genre?: string;
+}
+
+export interface SearchResults {
+    artists: ArtistSearchResult[];
+    albums: AlbumSearchResult[];
+    tracks: TrackSearchResult[];
+    podcasts: PodcastSearchResult[];
+    audiobooks: AudiobookSearchResult[];
+    episodes: EpisodeSearchResult[];
 }
 
 export class SearchService {
@@ -98,16 +116,19 @@ export class SearchService {
         const tsquery = this.queryToTsquery(query);
 
         try {
+            // Single query with EXISTS to filter artists with albums
             const results = await prisma.$queryRaw<ArtistSearchResult[]>`
         SELECT
-          id,
-          name,
-          mbid,
-          "heroUrl",
-          ts_rank("searchVector", to_tsquery('english', ${tsquery})) AS rank
-        FROM "Artist"
-        WHERE "searchVector" @@ to_tsquery('english', ${tsquery})
-        ORDER BY rank DESC, name ASC
+          a.id,
+          a.name,
+          a.mbid,
+          a."heroUrl",
+          a.summary,
+          ts_rank(a."searchVector", to_tsquery('english', ${tsquery})) AS rank
+        FROM "Artist" a
+        WHERE a."searchVector" @@ to_tsquery('english', ${tsquery})
+          AND EXISTS (SELECT 1 FROM "Album" alb WHERE alb."artistId" = a.id)
+        ORDER BY rank DESC, a.name ASC
         LIMIT ${limit}
         OFFSET ${offset}
       `;
@@ -121,6 +142,9 @@ export class SearchService {
                     name: {
                         contains: query,
                         mode: "insensitive",
+                    },
+                    albums: {
+                        some: {},
                     },
                 },
                 select: {
@@ -152,23 +176,43 @@ export class SearchService {
         const tsquery = this.queryToTsquery(query);
 
         try {
+            // UNION approach for better index utilization
+            // Each branch can use its respective GIN index efficiently
             const results = await prisma.$queryRaw<AlbumSearchResult[]>`
-        SELECT
-          a.id,
-          a.title,
-          a."artistId",
-          ar.name as "artistName",
-          a.year,
-          a."coverUrl",
-          GREATEST(
-            ts_rank(a."searchVector", to_tsquery('english', ${tsquery})),
-            ts_rank(ar."searchVector", to_tsquery('english', ${tsquery}))
-          ) AS rank
-        FROM "Album" a
-        LEFT JOIN "Artist" ar ON a."artistId" = ar.id
-        WHERE a."searchVector" @@ to_tsquery('english', ${tsquery})
-           OR ar."searchVector" @@ to_tsquery('english', ${tsquery})
-        ORDER BY rank DESC, a.title ASC
+        SELECT * FROM (
+          SELECT DISTINCT ON (id) id, title, "artistId", "artistName", year, "coverUrl", rank
+          FROM (
+            -- Albums matching by title (uses Album.searchVector GIN index)
+            SELECT
+              a.id,
+              a.title,
+              a."artistId",
+              ar.name as "artistName",
+              a.year,
+              a."coverUrl",
+              ts_rank(a."searchVector", to_tsquery('english', ${tsquery})) AS rank
+            FROM "Album" a
+            LEFT JOIN "Artist" ar ON a."artistId" = ar.id
+            WHERE a."searchVector" @@ to_tsquery('english', ${tsquery})
+
+            UNION ALL
+
+            -- Albums by matching artist (uses Artist.searchVector GIN index)
+            SELECT
+              a.id,
+              a.title,
+              a."artistId",
+              ar.name as "artistName",
+              a.year,
+              a."coverUrl",
+              ts_rank(ar."searchVector", to_tsquery('english', ${tsquery})) AS rank
+            FROM "Album" a
+            INNER JOIN "Artist" ar ON a."artistId" = ar.id
+            WHERE ar."searchVector" @@ to_tsquery('english', ${tsquery})
+          ) combined
+          ORDER BY id, rank DESC
+        ) deduped
+        ORDER BY rank DESC, title ASC
         LIMIT ${limit}
         OFFSET ${offset}
       `;
@@ -594,7 +638,7 @@ export class SearchService {
         }
     }
 
-    async searchAll({ query, limit = 10 }: SearchOptions) {
+    async searchAll({ query, limit = 10 }: SearchOptions): Promise<SearchResults> {
         if (!query || query.trim().length === 0) {
             return {
                 artists: [],
@@ -653,11 +697,114 @@ export class SearchService {
             episodes,
         };
 
-        // Cache for 1 hour (search results don't change often)
+        // Cache for 5 minutes (balance freshness vs performance)
         try {
-            await redisClient.setEx(cacheKey, 3600, JSON.stringify(results));
+            await redisClient.setEx(cacheKey, 300, JSON.stringify(results));
         } catch (err) {
             logger.warn("[SEARCH] Redis cache write error:", err);
+        }
+
+        return results;
+    }
+
+    /**
+     * Filter tracks by genre
+     */
+    async filterTracksByGenre(
+        tracks: TrackSearchResult[],
+        genre: string
+    ): Promise<TrackSearchResult[]> {
+        if (tracks.length === 0) return [];
+
+        const trackIds = tracks.map((t) => t.id);
+        const tracksWithGenre = await prisma.track.findMany({
+            where: {
+                id: { in: trackIds },
+                trackGenres: {
+                    some: {
+                        genre: {
+                            name: {
+                                equals: genre,
+                                mode: "insensitive",
+                            },
+                        },
+                    },
+                },
+            },
+            select: { id: true },
+        });
+
+        const genreTrackIds = new Set(tracksWithGenre.map((t) => t.id));
+        return tracks.filter((t) => genreTrackIds.has(t.id));
+    }
+
+    /**
+     * Search by specific type with caching
+     */
+    async searchByType({
+        query,
+        type,
+        limit = 20,
+        offset = 0,
+        genre,
+    }: SearchByTypeOptions): Promise<SearchResults> {
+        const results: SearchResults = {
+            artists: [],
+            albums: [],
+            tracks: [],
+            podcasts: [],
+            audiobooks: [],
+            episodes: [],
+        };
+
+        if (!query || query.trim().length === 0) {
+            return results;
+        }
+
+        // Check cache
+        const cacheKey = `search:${type}:${query}:${limit}:${genre || ""}`;
+        try {
+            const cached = await redisClient.get(cacheKey);
+            if (cached) {
+                logger.debug(`[SEARCH] Cache HIT for ${type} query: "${query}"`);
+                return JSON.parse(cached);
+            }
+        } catch (err) {
+            logger.warn("[SEARCH] Redis read error:", err);
+        }
+
+        // Execute single-type search
+        switch (type) {
+            case "artists":
+                results.artists = await this.searchArtists({ query, limit, offset });
+                break;
+            case "albums":
+                results.albums = await this.searchAlbums({ query, limit, offset });
+                break;
+            case "tracks": {
+                let tracks = await this.searchTracks({ query, limit, offset });
+                if (genre) {
+                    tracks = await this.filterTracksByGenre(tracks, genre);
+                }
+                results.tracks = tracks;
+                break;
+            }
+            case "podcasts":
+                results.podcasts = await this.searchPodcastsFTS({ query, limit, offset });
+                break;
+            case "audiobooks":
+                results.audiobooks = await this.searchAudiobooksFTS({ query, limit, offset });
+                break;
+            case "episodes":
+                results.episodes = await this.searchEpisodes({ query, limit, offset });
+                break;
+        }
+
+        // Cache for 2 minutes
+        try {
+            await redisClient.setEx(cacheKey, 120, JSON.stringify(results));
+        } catch (err) {
+            logger.warn("[SEARCH] Redis write error:", err);
         }
 
         return results;

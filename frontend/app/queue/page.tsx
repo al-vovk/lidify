@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -129,15 +130,18 @@ export default function QueuePage() {
                         </h2>
                         <Card>
                             <div className="flex items-center gap-4 p-4 bg-[#1a1a1a] border-l-2 border-purple-500">
-                                <div className="relative flex-shrink-0">
+                                <div className="relative flex-shrink-0 w-16 h-16">
                                     {currentTrack.album?.coverArt ? (
-                                        <img
+                                        <Image
                                             src={api.getCoverArtUrl(
                                                 currentTrack.album.coverArt,
                                                 100
                                             )}
                                             alt={currentTrack.album.title}
-                                            className="w-16 h-16 rounded-sm"
+                                            fill
+                                            sizes="64px"
+                                            className="object-cover rounded-sm"
+                                            unoptimized
                                         />
                                     ) : (
                                         <div className="w-16 h-16 bg-[#0a0a0a] rounded-sm flex items-center justify-center">
@@ -198,16 +202,19 @@ export default function QueuePage() {
                                             </button>
 
                                             {/* Album Art */}
-                                            <div className="flex-shrink-0">
+                                            <div className="relative flex-shrink-0 w-12 h-12">
                                                 {track.album?.coverArt ? (
-                                                    <img
+                                                    <Image
                                                         src={api.getCoverArtUrl(
                                                             track.album
                                                                 .coverArt,
                                                             100
                                                         )}
                                                         alt={track.album.title}
-                                                        className="w-12 h-12 rounded-sm"
+                                                        fill
+                                                        sizes="48px"
+                                                        className="object-cover rounded-sm"
+                                                        unoptimized
                                                     />
                                                 ) : (
                                                     <div className="w-12 h-12 bg-[#0a0a0a] rounded-sm flex items-center justify-center">
@@ -313,15 +320,18 @@ export default function QueuePage() {
                                         className="flex items-center gap-4 p-4 hover:bg-[#1a1a1a] transition-colors group opacity-50"
                                     >
                                         {/* Album Art */}
-                                        <div className="flex-shrink-0">
+                                        <div className="relative flex-shrink-0 w-12 h-12">
                                             {track.album?.coverArt ? (
-                                                <img
+                                                <Image
                                                     src={api.getCoverArtUrl(
                                                         track.album.coverArt,
                                                         100
                                                     )}
                                                     alt={track.album.title}
-                                                    className="w-12 h-12 rounded-sm"
+                                                    fill
+                                                    sizes="48px"
+                                                    className="object-cover rounded-sm"
+                                                    unoptimized
                                                 />
                                             ) : (
                                                 <div className="w-12 h-12 bg-[#0a0a0a] rounded-sm flex items-center justify-center">

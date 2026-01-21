@@ -14,6 +14,7 @@ interface ArtistHeroProps {
     source: ArtistSource;
     albums: Album[];
     heroImage: string | null;
+    backgroundImage?: string | null;
     colors: any;
     onReload: () => void;
     children?: ReactNode;
@@ -24,6 +25,7 @@ export function ArtistHero({
     source,
     albums,
     heroImage,
+    backgroundImage,
     colors,
     onReload,
     children,
@@ -31,14 +33,17 @@ export function ArtistHero({
     const displayData = useArtistDisplayData(artist);
     const ownedAlbums = albums.filter((a) => a.owned);
 
+    // Use background image if provided, otherwise fall back to hero image
+    const bgImage = backgroundImage || heroImage;
+
     return (
         <div className="relative">
             {/* Background Image with VibrantJS gradient */}
-            {heroImage ? (
+            {bgImage ? (
                 <div className="absolute inset-0 overflow-hidden">
                     <div className="absolute inset-0 scale-110 blur-md opacity-50">
                         <Image
-                            src={heroImage}
+                            src={bgImage}
                             alt={displayData.name}
                             fill
                             sizes="100vw"

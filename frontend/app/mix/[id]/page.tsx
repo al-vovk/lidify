@@ -334,12 +334,15 @@ export default function MixPage() {
 
                                         {/* Title + Artist */}
                                         <div className="flex items-center gap-3 min-w-0">
-                                            <div className="w-10 h-10 bg-[#282828] rounded shrink-0 overflow-hidden">
+                                            <div className="relative w-10 h-10 bg-[#282828] rounded shrink-0 overflow-hidden">
                                                 {track.album?.coverUrl ? (
-                                                    <img
+                                                    <Image
                                                         src={api.getCoverArtUrl(track.album.coverUrl, 100)}
                                                         alt={track.title}
-                                                        className="w-full h-full object-cover"
+                                                        fill
+                                                        sizes="40px"
+                                                        className="object-cover"
+                                                        unoptimized
                                                     />
                                                 ) : (
                                                     <div className="w-full h-full flex items-center justify-center">

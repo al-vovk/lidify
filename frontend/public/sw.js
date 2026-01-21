@@ -1,5 +1,9 @@
 // Lidify Service Worker
 const CACHE_NAME = 'lidify-v1';
+const IMAGE_CACHE_NAME = 'lidify-images-v1';
+const MAX_IMAGE_CACHE_ENTRIES = 500;
+const MAX_CONCURRENT_IMAGE_REQUESTS = 8;
+const REQUEST_DELAY_MS = 10;
 
 // Assets to cache on install (app shell)
 const PRECACHE_ASSETS = [
@@ -7,6 +11,94 @@ const PRECACHE_ASSETS = [
   '/manifest.webmanifest',
   '/assets/images/LIDIFY.webp',
 ];
+
+// Image route patterns to cache
+const IMAGE_PATTERNS = [
+  /^\/api\/library\/cover-art/,
+  /^\/api\/audiobooks\/.*\/cover/,
+  /^\/api\/podcasts\/.*\/cover/,
+];
+
+// Request queue for throttling concurrent image fetches
+let activeImageRequests = 0;
+const imageRequestQueue = [];
+
+/**
+ * Check if a URL should use image caching
+ */
+function isImageRoute(pathname) {
+  return IMAGE_PATTERNS.some(pattern => pattern.test(pathname));
+}
+
+/**
+ * Trim cache to max entries (LRU eviction by oldest)
+ */
+async function trimCache(cacheName, maxEntries) {
+  const cache = await caches.open(cacheName);
+  const keys = await cache.keys();
+
+  if (keys.length > maxEntries) {
+    // Delete oldest entries (first in = oldest)
+    const deleteCount = keys.length - maxEntries;
+    for (let i = 0; i < deleteCount; i++) {
+      await cache.delete(keys[i]);
+    }
+  }
+}
+
+/**
+ * Process the image request queue
+ */
+function processImageQueue() {
+  while (activeImageRequests < MAX_CONCURRENT_IMAGE_REQUESTS && imageRequestQueue.length > 0) {
+    const { request, resolve, reject } = imageRequestQueue.shift();
+    activeImageRequests++;
+
+    fetchAndCacheImage(request)
+      .then(resolve)
+      .catch(reject)
+      .finally(() => {
+        activeImageRequests--;
+        // Small delay before processing next to avoid burst
+        setTimeout(processImageQueue, REQUEST_DELAY_MS);
+      });
+  }
+}
+
+/**
+ * Fetch image from network and cache it
+ */
+async function fetchAndCacheImage(request) {
+  const cache = await caches.open(IMAGE_CACHE_NAME);
+
+  try {
+    const networkResponse = await fetch(request);
+
+    // Cache successful responses
+    if (networkResponse.status === 200) {
+      // Clone before caching (response can only be consumed once)
+      cache.put(request, networkResponse.clone());
+
+      // Trim cache in background (don't block response)
+      trimCache(IMAGE_CACHE_NAME, MAX_IMAGE_CACHE_ENTRIES);
+    }
+
+    return networkResponse;
+  } catch (error) {
+    // Network failed, return a placeholder or error
+    return new Response('Image unavailable', { status: 503 });
+  }
+}
+
+/**
+ * Queue an image request with throttling
+ */
+function queueImageRequest(request) {
+  return new Promise((resolve, reject) => {
+    imageRequestQueue.push({ request, resolve, reject });
+    processImageQueue();
+  });
+}
 
 // Install event - cache app shell
 self.addEventListener('install', (event) => {
@@ -25,7 +117,7 @@ self.addEventListener('activate', (event) => {
     caches.keys().then((cacheNames) => {
       return Promise.all(
         cacheNames
-          .filter((name) => name !== CACHE_NAME)
+          .filter((name) => name !== CACHE_NAME && name !== IMAGE_CACHE_NAME)
           .map((name) => caches.delete(name))
       );
     })
@@ -34,7 +126,7 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// Fetch event - network first, fallback to cache
+// Fetch event - handle requests
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
@@ -45,14 +137,33 @@ self.addEventListener('fetch', (event) => {
   // Skip non-http(s) URLs (chrome-extension://, etc.)
   if (!url.protocol.startsWith('http')) return;
 
-  // Skip API requests - always go to network
-  if (url.pathname.startsWith('/api/')) return;
-
   // Skip streaming endpoints
   if (url.pathname.includes('/stream')) return;
-  
+
   // Skip Next.js image optimization endpoint
   if (url.pathname.startsWith('/_next/image')) return;
+
+  // Handle image routes with cache-first strategy + request throttling
+  if (isImageRoute(url.pathname)) {
+    event.respondWith(
+      (async () => {
+        const cache = await caches.open(IMAGE_CACHE_NAME);
+
+        // Try cache first
+        const cachedResponse = await cache.match(request);
+        if (cachedResponse) {
+          return cachedResponse;
+        }
+
+        // Not in cache, queue the request with throttling
+        return queueImageRequest(request);
+      })()
+    );
+    return;
+  }
+
+  // Skip other API requests - always go to network
+  if (url.pathname.startsWith('/api/')) return;
 
   // For everything else, try network first, then cache
   event.respondWith(
@@ -60,14 +171,14 @@ self.addEventListener('fetch', (event) => {
       .then((response) => {
         // Clone the response before caching
         const responseClone = response.clone();
-        
+
         // Cache successful responses
         if (response.status === 200) {
           caches.open(CACHE_NAME).then((cache) => {
             cache.put(request, responseClone);
           });
         }
-        
+
         return response;
       })
       .catch(() => {
@@ -76,15 +187,14 @@ self.addEventListener('fetch', (event) => {
           if (cachedResponse) {
             return cachedResponse;
           }
-          
+
           // Return a fallback for navigation requests
           if (request.mode === 'navigate') {
             return caches.match('/');
           }
-          
+
           return new Response('Offline', { status: 503 });
         });
       })
   );
 });
-
