@@ -84,6 +84,18 @@ const ArtistsGrid = memo(function ArtistsGrid({
     onDelete,
     isLoading = false,
 }: ArtistsGridProps) {
+    const itemContent = useCallback(
+        (index: number, artist: Artist) => (
+            <ArtistCardItem
+                artist={artist}
+                index={index}
+                onPlay={onPlay}
+                onDelete={onDelete}
+            />
+        ),
+        [onPlay, onDelete],
+    );
+
     if (isLoading) {
         return (
             <div className="flex items-center justify-center min-h-[400px]">
@@ -108,14 +120,7 @@ const ArtistsGrid = memo(function ArtistsGrid({
                 useWindowScroll
                 data={artists}
                 listClassName="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-4"
-                itemContent={(index, artist) => (
-                    <ArtistCardItem
-                        artist={artist}
-                        index={index}
-                        onPlay={onPlay}
-                        onDelete={onDelete}
-                    />
-                )}
+                itemContent={itemContent}
             />
         </div>
     );

@@ -58,6 +58,12 @@ class HowlerEngine {
     private seekTargetTime: number | null = null;
     private seekTimeoutId: NodeJS.Timeout | null = null;
 
+    // Preload state - for gapless playback
+    private preloadHowl: Howl | null = null;
+    private preloadSrc: string | null = null;
+    private preloadFormat: string | undefined = undefined;
+    private isPreloading: boolean = false;
+
     constructor() {
         // Initialize event listener maps
         const events: HowlerEventType[] = [
@@ -98,6 +104,35 @@ class HowlerEngine {
         // Prevent duplicate loads - if already loading this URL, skip
         if (this.isLoading && this.state.currentSrc === src) {
             return;
+        }
+
+        // Check if this source is preloaded - enables instant gapless switching
+        if (this.isPreloaded(src)) {
+            const preloadedHowl = this.getPreloadedHowl(src);
+            if (preloadedHowl) {
+                // Clean up current track
+                this.cleanup();
+
+                this.state.currentSrc = src;
+                this.howl = preloadedHowl;
+
+                // Set up event handlers for the preloaded instance
+                this.setupHowlEventHandlers(autoplay);
+
+                // Set correct volume
+                const targetVolume = this.state.isMuted ? 0 : this.state.volume;
+                this.howl.volume(targetVolume);
+
+                // Mark as loaded and emit
+                this.isLoading = false;
+                this.state.duration = this.howl.duration() || 0;
+                this.emit("load", { duration: this.state.duration });
+
+                if (autoplay) {
+                    this.play();
+                }
+                return;
+            }
         }
 
         // Set loading guard immediately
@@ -352,6 +387,116 @@ class HowlerEngine {
     }
 
     /**
+     * Preload a track in the background for gapless playback
+     * @param src - Audio URL to preload
+     * @param format - Audio format hint (mp3, flac, etc.)
+     */
+    preload(src: string, format?: string): void {
+        // Don't preload if same as current source
+        if (this.state.currentSrc === src) {
+            return;
+        }
+
+        // Don't preload if already preloading/preloaded same source
+        if (this.preloadSrc === src) {
+            return;
+        }
+
+        // Cancel any existing preload first
+        this.cancelPreload();
+
+        this.isPreloading = true;
+        this.preloadSrc = src;
+        this.preloadFormat = format;
+
+        // Detect if running in Android WebView
+        const isAndroidWebView =
+            typeof navigator !== "undefined" &&
+            /wv/.test(navigator.userAgent.toLowerCase()) &&
+            /android/.test(navigator.userAgent.toLowerCase());
+
+        // Check if this is a podcast/audiobook stream
+        const isPodcastOrAudiobook =
+            src.includes("/api/podcasts/") || src.includes("/api/audiobooks/");
+
+        // Build Howl config (same logic as load())
+        const howlConfig: any = {
+            src: [src],
+            html5: isPodcastOrAudiobook || !isAndroidWebView,
+            autoplay: false,
+            preload: true,
+            volume: 0, // Start muted for preload
+            ...(isAndroidWebView && { xhr: { timeout: 30000 } }),
+        };
+
+        // Only add format if provided
+        if (format) {
+            howlConfig.format = [format];
+        }
+
+        this.preloadHowl = new Howl({
+            ...howlConfig,
+            onload: () => {
+                this.isPreloading = false;
+            },
+            onloaderror: (id, error) => {
+                console.error("[HowlerEngine] Preload error:", error);
+                this.cancelPreload();
+            },
+        });
+    }
+
+    /**
+     * Cancel any in-progress preload
+     */
+    cancelPreload(): void {
+        if (this.preloadHowl) {
+            try {
+                this.preloadHowl.unload();
+            } catch {
+                // Intentionally ignored: cleanup errors are harmless
+            }
+            this.preloadHowl = null;
+        }
+        this.preloadSrc = null;
+        this.preloadFormat = undefined;
+        this.isPreloading = false;
+    }
+
+    /**
+     * Check if a source is preloaded and ready
+     * @param src - Audio URL to check
+     */
+    isPreloaded(src: string): boolean {
+        return (
+            this.preloadSrc === src &&
+            this.preloadHowl !== null &&
+            !this.isPreloading
+        );
+    }
+
+    /**
+     * Get the preloaded Howl instance and transfer ownership
+     * After calling this, the caller owns the Howl and must manage its lifecycle
+     * @param src - Audio URL to get preloaded Howl for
+     * @returns The preloaded Howl instance or null if not preloaded
+     */
+    getPreloadedHowl(src: string): Howl | null {
+        if (!this.isPreloaded(src)) {
+            return null;
+        }
+
+        const howl = this.preloadHowl;
+        // Transfer ownership - clear preload state without unloading
+        this.preloadHowl = null;
+        this.preloadSrc = null;
+        this.preloadFormat = undefined;
+        this.isPreloading = false;
+
+        return howl;
+    }
+
+    /**
      * Set volume (0-1)
      */
     setVolume(volume: number): void {
@@ -502,9 +647,60 @@ class HowlerEngine {
     }
 
     /**
+     * Set up event handlers on a Howl instance
+     * Used to attach handlers to preloaded instances after ownership transfer
+     */
+    private setupHowlEventHandlers(autoplay: boolean): void {
+        if (!this.howl) return;
+
+        this.howl.on("play", () => {
+            this.state.isPlaying = true;
+            this.userInitiatedPlay = false;
+            this.startTimeUpdates();
+            this.emit("play");
+        });
+
+        this.howl.on("pause", () => {
+            this.state.isPlaying = false;
+            this.userInitiatedPlay = false;
+            this.stopTimeUpdates();
+            this.emit("pause");
+        });
+
+        this.howl.on("stop", () => {
+            this.state.isPlaying = false;
+            this.state.currentTime = 0;
+            this.stopTimeUpdates();
+            this.emit("stop");
+        });
+
+        this.howl.on("end", () => {
+            this.state.isPlaying = false;
+            this.stopTimeUpdates();
+            this.emit("end");
+        });
+
+        this.howl.on("seek", () => {
+            if (this.howl) {
+                this.state.currentTime = this.howl.seek() as number;
+                this.emit("seek", { time: this.state.currentTime });
+            }
+        });
+
+        this.howl.on("playerror", (id, error) => {
+            console.error("[HowlerEngine] Play error:", error);
+            this.state.isPlaying = false;
+            this.userInitiatedPlay = false;
+            this.stopTimeUpdates();
+            this.emit("playerror", { error });
+        });
+    }
+
+    /**
      * Cleanup current Howl instance
      */
     private cleanup(): void {
+        this.cancelPreload();
         this.stopTimeUpdates();
 
         // Cancel any pending cleanup timeout to prevent race conditions
@@ -558,6 +754,7 @@ class HowlerEngine {
      */
     destroy(): void {
         this.cleanup();
+        this.cancelPreload();
         this.isLoading = false;
         this.eventListeners.clear();
         // Ensure cleanup timeout is cleared
