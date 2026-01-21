@@ -16,6 +16,38 @@ import {
     useMemo,
 } from "react";
 
+function getNextTrackInfo(
+    queue: { id: string; filePath?: string }[],
+    currentIndex: number,
+    isShuffle: boolean,
+    shuffleIndices: number[],
+    repeatMode: "off" | "one" | "all"
+): { id: string; filePath?: string } | null {
+    if (queue.length === 0) return null;
+
+    let nextIndex: number;
+    if (isShuffle) {
+        const currentShufflePos = shuffleIndices.indexOf(currentIndex);
+        if (currentShufflePos < shuffleIndices.length - 1) {
+            nextIndex = shuffleIndices[currentShufflePos + 1];
+        } else if (repeatMode === "all") {
+            nextIndex = shuffleIndices[0];
+        } else {
+            return null;
+        }
+    } else {
+        if (currentIndex < queue.length - 1) {
+            nextIndex = currentIndex + 1;
+        } else if (repeatMode === "all") {
+            nextIndex = 0;
+        } else {
+            return null;
+        }
+    }
+
+    return queue[nextIndex] || null;
+}
+
 function podcastDebugEnabled(): boolean {
     try {
         return (
@@ -53,6 +85,9 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
         setCurrentPodcast,
         setPlaybackType,
         queue,
+        currentIndex,
+        isShuffle,
+        shuffleIndices,
     } = useAudioState();
 
     // Playback context
@@ -98,6 +133,9 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
     // Debounce timer for rapid podcast seeks
     const seekDebounceRef = useRef<NodeJS.Timeout | null>(null);
     const pendingSeekTimeRef = useRef<number | null>(null);
+    // Preload management
+    const preloadTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const lastPreloadedTrackIdRef = useRef<string | null>(null);
 
     // Reset duration when nothing is playing
     useEffect(() => {
@@ -444,6 +482,59 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
             isLoadingRef.current = false;
         }
     }, [currentTrack, currentAudiobook, currentPodcast, playbackType, setDuration]);
+
+    // Preload next track for gapless playback (music only)
+    useEffect(() => {
+        // Only preload for music tracks, not podcasts/audiobooks
+        if (playbackType !== "track" || !currentTrack || !isPlaying) {
+            return;
+        }
+
+        // Clear any pending preload timeout
+        if (preloadTimeoutRef.current) {
+            clearTimeout(preloadTimeoutRef.current);
+            preloadTimeoutRef.current = null;
+        }
+
+        const nextTrack = getNextTrackInfo(
+            queue,
+            currentIndex,
+            isShuffle,
+            shuffleIndices,
+            repeatMode
+        );
+
+        // Don't preload if no next track or already preloaded this one
+        if (!nextTrack || nextTrack.id === lastPreloadedTrackIdRef.current) {
+            return;
+        }
+
+        // Preload after 2 seconds of playback to avoid preloading during rapid skipping
+        preloadTimeoutRef.current = setTimeout(() => {
+            const streamUrl = api.getStreamUrl(nextTrack.id);
+
+            // Determine format from file path
+            let format = "mp3";
+            const filePath = nextTrack.filePath || "";
+            if (filePath) {
+                const ext = filePath.split(".").pop()?.toLowerCase();
+                if (ext === "flac") format = "flac";
+                else if (ext === "m4a" || ext === "aac") format = "mp4";
+                else if (ext === "ogg" || ext === "opus") format = "webm";
+                else if (ext === "wav") format = "wav";
+            }
+
+            howlerEngine.preload(streamUrl, format);
+            lastPreloadedTrackIdRef.current = nextTrack.id;
+        }, 2000);
+
+        return () => {
+            if (preloadTimeoutRef.current) {
+                clearTimeout(preloadTimeoutRef.current);
+                preloadTimeoutRef.current = null;
+            }
+        };
+    }, [playbackType, currentTrack, isPlaying, queue, currentIndex, isShuffle, shuffleIndices, repeatMode]);
 
     // Check podcast cache status and control canSeek
     useEffect(() => {
@@ -1003,6 +1094,11 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
                 howlerEngine.off("load", cachePollingLoadListenerRef.current);
                 cachePollingLoadListenerRef.current = null;
             }
+            // Clean up preload refs
+            if (preloadTimeoutRef.current) {
+                clearTimeout(preloadTimeoutRef.current);
+            }
+            lastPreloadedTrackIdRef.current = null;
         };
     }, []);
 
