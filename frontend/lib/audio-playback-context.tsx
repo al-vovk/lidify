@@ -11,6 +11,7 @@ import {
     useMemo,
 } from "react";
 import { useAudioState } from "./audio-state-context";
+import { playbackStateMachine, type PlaybackState } from "./audio";
 
 interface AudioPlaybackContextType {
     isPlaying: boolean;
@@ -21,6 +22,8 @@ interface AudioPlaybackContextType {
     canSeek: boolean;
     downloadProgress: number | null; // 0-100 for downloading, null for not downloading
     isSeekLocked: boolean; // True when a seek operation is in progress
+    audioError: string | null; // Error message from state machine
+    playbackState: PlaybackState; // Raw state machine state for advanced use
     setIsPlaying: (playing: boolean) => void;
     setCurrentTime: (time: number) => void;
     setCurrentTimeFromEngine: (time: number) => void; // For timeupdate events - respects seek lock
@@ -31,6 +34,7 @@ interface AudioPlaybackContextType {
     setDownloadProgress: (progress: number | null) => void;
     lockSeek: (targetTime: number) => void; // Lock updates during seek
     unlockSeek: () => void; // Unlock after seek completes
+    clearAudioError: () => void; // Clear the audio error state
 }
 
 const AudioPlaybackContext = createContext<
@@ -55,8 +59,45 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     const [downloadProgress, setDownloadProgress] = useState<number | null>(
         null
     );
+    const [audioError, setAudioError] = useState<string | null>(null);
+    const [playbackState, setPlaybackState] = useState<PlaybackState>("IDLE");
     const [isHydrated, setIsHydrated] = useState(false);
     const lastSaveTimeRef = useRef<number>(0);
+
+    // Clear audio error
+    const clearAudioError = useCallback(() => {
+        setAudioError(null);
+        // Also reset state machine if in error state
+        if (playbackStateMachine.hasError) {
+            playbackStateMachine.forceTransition("IDLE");
+        }
+    }, []);
+
+    // Subscribe to state machine changes
+    useEffect(() => {
+        const unsubscribe = playbackStateMachine.subscribe((ctx) => {
+            setPlaybackState(ctx.state);
+
+            // Derive isPlaying and isBuffering from state machine
+            // This creates a single source of truth
+            const machineIsPlaying = ctx.state === "PLAYING";
+            const machineIsBuffering = ctx.state === "BUFFERING" || ctx.state === "LOADING";
+
+            // Only update if different to prevent unnecessary renders
+            setIsPlaying((prev) => prev !== machineIsPlaying ? machineIsPlaying : prev);
+            setIsBuffering((prev) => prev !== machineIsBuffering ? machineIsBuffering : prev);
+
+            // Update error state
+            if (ctx.state === "ERROR" && ctx.error) {
+                setAudioError(ctx.error);
+            } else if (ctx.state !== "ERROR" && audioError) {
+                // Clear error when leaving error state
+                setAudioError(null);
+            }
+        });
+
+        return unsubscribe;
+    }, [audioError]);
 
     // Seek lock state - prevents stale timeupdate events from overwriting optimistic UI updates
     const [isSeekLocked, setIsSeekLocked] = useState(false);
@@ -193,6 +234,8 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
             canSeek,
             downloadProgress,
             isSeekLocked,
+            audioError,
+            playbackState,
             setIsPlaying,
             setCurrentTime,
             setCurrentTimeFromEngine,
@@ -203,6 +246,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
             setDownloadProgress,
             lockSeek,
             unlockSeek,
+            clearAudioError,
         }),
         [
             isPlaying,
@@ -213,9 +257,12 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
             canSeek,
             downloadProgress,
             isSeekLocked,
+            audioError,
+            playbackState,
             setCurrentTimeFromEngine,
             lockSeek,
             unlockSeek,
+            clearAudioError,
         ]
     );
 
