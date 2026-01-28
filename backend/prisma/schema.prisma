@@ -227,6 +227,7 @@ model Track {
   album              Album                    @relation(fields: [albumId], references: [id], onDelete: Cascade)
   trackGenres        TrackGenre[]
   transcodedFiles    TranscodedFile[]
+  embedding          TrackEmbedding?
 
   @@index([albumId])
   @@index([fileModified])
@@ -890,4 +891,15 @@ enum ListenSource {
 enum AlbumLocation {
   LIBRARY
   DISCOVER
+}
+
+model TrackEmbedding {
+  trackId      String                      @id @map("track_id")
+  embedding    Unsupported("vector(1024)")
+  modelVersion String                      @default("laion-clap-music") @map("model_version") @db.VarChar(50)
+  analyzedAt   DateTime                    @default(now()) @map("analyzed_at") @db.Timestamptz
+  track        Track                       @relation(fields: [trackId], references: [id], onDelete: Cascade)
+
+  @@index([modelVersion])
+  @@map("track_embeddings")
 }
