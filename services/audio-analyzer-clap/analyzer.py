@@ -2,7 +2,7 @@
 """
 CLAP Audio Analyzer Service - LAION CLAP embeddings for vibe similarity
 
-This service processes audio files and generates 1024-dimensional embeddings
+This service processes audio files and generates 512-dimensional embeddings
 using LAION CLAP (Contrastive Language-Audio Pretraining). These embeddings
 enable semantic similarity search - finding tracks that "sound similar" based
 on learned audio representations.
@@ -31,6 +31,7 @@ from typing import Optional, Tuple
 import traceback
 import numpy as np
 import librosa
+import requests
 
 # CPU thread limiting must be set before importing torch
 THREADS_PER_WORKER = int(os.getenv('THREADS_PER_WORKER', '1'))
@@ -59,6 +60,7 @@ DATABASE_URL = os.getenv('DATABASE_URL', '')
 MUSIC_PATH = os.getenv('MUSIC_PATH', '/music')
 SLEEP_INTERVAL = int(os.getenv('SLEEP_INTERVAL', '5'))
 NUM_WORKERS = int(os.getenv('NUM_WORKERS', '2'))
+BACKEND_URL = os.getenv('BACKEND_URL', 'http://backend:3006')
 
 # Queue and channel names
 ANALYSIS_QUEUE = 'audio:analysis:queue'
@@ -152,7 +154,7 @@ class CLAPAnalyzer:
 
     def get_audio_embedding(self, audio_path: str, duration: Optional[float] = None) -> Optional[np.ndarray]:
         """
-        Generate a 1024-dimensional embedding from an audio file.
+        Generate a 512-dimensional embedding from an audio file.
 
         Extracts the middle 60 seconds of the track for embedding, which
         captures the vibe while avoiding intros/outros and reducing memory.
@@ -162,7 +164,7 @@ class CLAPAnalyzer:
             duration: Pre-computed duration in seconds (avoids file read)
 
         Returns:
-            numpy array of shape (1024,) or None on error
+            numpy array of shape (512,) or None on error
         """
         if self.model is None:
             raise RuntimeError("Model not loaded. Call load_model() first.")
@@ -188,19 +190,11 @@ class CLAPAnalyzer:
                     use_tensor=False
                 )
 
-                # Result is shape (1, 512) for base model, normalized
+                # Result is shape (1, 512) for HTSAT-base model, normalized
                 embedding = embeddings[0]
 
-                # Verify embedding dimension
                 if embedding.shape[0] != 512:
                     logger.warning(f"Unexpected embedding dimension: {embedding.shape}")
-
-                # CLAP base model outputs 512-dim, but we need 1024 for our schema
-                # Pad with zeros to match the expected dimension
-                if embedding.shape[0] < 1024:
-                    padded = np.zeros(1024, dtype=np.float32)
-                    padded[:embedding.shape[0]] = embedding
-                    embedding = padded
 
                 return embedding.astype(np.float32)
 
@@ -211,13 +205,13 @@ class CLAPAnalyzer:
 
     def get_text_embedding(self, text: str) -> Optional[np.ndarray]:
         """
-        Generate a 1024-dimensional embedding from a text query.
+        Generate a 512-dimensional embedding from a text query.
 
         Args:
             text: Natural language description (e.g., "upbeat electronic dance music")
 
         Returns:
-            numpy array of shape (1024,) or None on error
+            numpy array of shape (512,) or None on error
         """
         if self.model is None:
             raise RuntimeError("Model not loaded. Call load_model() first.")
@@ -236,11 +230,8 @@ class CLAPAnalyzer:
 
                 embedding = embeddings[0]
 
-                # Pad to 1024 dimensions if needed
-                if embedding.shape[0] < 1024:
-                    padded = np.zeros(1024, dtype=np.float32)
-                    padded[:embedding.shape[0]] = embedding
-                    embedding = padded
+                if embedding.shape[0] != 512:
+                    logger.warning(f"Unexpected text embedding dimension: {embedding.shape}")
 
                 return embedding.astype(np.float32)
 
@@ -418,9 +409,14 @@ class Worker:
             cursor.close()
 
     def _mark_failed(self, track_id: str, error: str):
-        """Mark track as failed"""
+        """Mark track as failed and record in enrichment failures"""
         cursor = self.db.get_cursor()
         try:
+            # Get track name for better failure visibility
+            cursor.execute('SELECT title FROM "Track" WHERE id = %s', (track_id,))
+            row = cursor.fetchone()
+            track_name = row['title'] if row else None
+
             cursor.execute("""
                 UPDATE "Track"
                 SET
@@ -431,6 +427,27 @@ class Worker:
             """, (error[:500], track_id))
             self.db.commit()
             logger.error(f"Track {track_id} failed: {error}")
+
+            # Report failure to backend enrichment failure service
+            try:
+                headers = {
+                    "Content-Type": "application/json",
+                    "X-Internal-Secret": os.getenv("INTERNAL_API_SECRET", "")
+                }
+                requests.post(
+                    f"{BACKEND_URL}/api/analysis/vibe/failure",
+                    json={
+                        "trackId": track_id,
+                        "trackName": track_name,
+                        "errorMessage": error[:500],
+                        "errorCode": "VIBE_EMBEDDING_FAILED"
+                    },
+                    headers=headers,
+                    timeout=5
+                )
+            except Exception as report_err:
+                logger.warning(f"Failed to report failure to backend: {report_err}")
+
         except Exception as e:
             logger.error(f"Failed to mark track as failed: {e}")
             self.db.rollback()

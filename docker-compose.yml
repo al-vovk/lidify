@@ -33,6 +33,9 @@ services:
             # CORS
             ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:3030}
 
+            # Internal API secret for service-to-service auth
+            INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:-lidify-internal-secret-change-me}
+
             # Lidarr webhook callback URL - how Lidarr can reach Lidify
             # Use backend:3006 for same-network communication, or external IP:3030 for external Lidarr
             LIDIFY_CALLBACK_URL: ${LIDIFY_CALLBACK_URL:-http://backend:3006}
@@ -270,16 +273,20 @@ services:
         environment:
             REDIS_URL: redis://redis:6379
             DATABASE_URL: postgresql://${POSTGRES_USER:-lidifydb}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-lidify}
+            BACKEND_URL: http://backend:3006
             MUSIC_PATH: /music
             SLEEP_INTERVAL: ${CLAP_SLEEP_INTERVAL:-5}
             NUM_WORKERS: ${CLAP_WORKERS:-2}
             THREADS_PER_WORKER: ${CLAP_THREADS_PER_WORKER:-1}
+            INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:-lidify-internal-secret-change-me}
         volumes:
             - ${MUSIC_PATH:-./music}:/music:ro
         depends_on:
             postgres:
                 condition: service_healthy
             redis:
+                condition: service_healthy
+            backend:
                 condition: service_healthy
         restart: unless-stopped
         deploy:

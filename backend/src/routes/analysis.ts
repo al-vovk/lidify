@@ -4,12 +4,14 @@ import { prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
 import { requireAuth, requireAdmin } from "../middleware/auth";
 import { getSystemSettings } from "../utils/systemSettings";
+import { enrichmentFailureService } from "../services/enrichmentFailureService";
 import os from "os";
 
 const router = Router();
 
 // Redis queue key for audio analysis
 const ANALYSIS_QUEUE = "audio:analysis:queue";
+const VIBE_QUEUE = "audio:analysis:queue"; // CLAP uses same queue
 
 /**
  * GET /api/analysis/status
@@ -435,6 +437,155 @@ router.put("/clap-workers", requireAuth, requireAdmin, async (req, res) => {
     } catch (error: any) {
         logger.error("Update CLAP workers config error:", error);
         res.status(500).json({ error: "Failed to update CLAP worker configuration" });
+    }
+});
+
+/**
+ * POST /api/analysis/vibe/failure
+ * Record a vibe embedding failure (called by CLAP analyzer)
+ */
+router.post("/vibe/failure", async (req, res) => {
+    // Internal endpoint - verify shared secret from CLAP analyzer
+    const internalSecret = req.headers["x-internal-secret"];
+    if (internalSecret !== process.env.INTERNAL_API_SECRET) {
+        return res.status(403).json({ error: "Forbidden" });
+    }
+
+    try {
+        const { trackId, trackName, errorMessage, errorCode } = req.body;
+
+        if (!trackId) {
+            return res.status(400).json({ error: "trackId is required" });
+        }
+
+        await enrichmentFailureService.recordFailure({
+            entityType: "vibe",
+            entityId: trackId,
+            entityName: trackName,
+            errorMessage: errorMessage || "Vibe embedding generation failed",
+            errorCode: errorCode,
+        });
+
+        res.json({ message: "Failure recorded" });
+    } catch (error: any) {
+        logger.error("Record vibe failure error:", error);
+        res.status(500).json({ error: "Failed to record failure" });
+    }
+});
+
+/**
+ * POST /api/analysis/vibe/start
+ * Queue tracks for vibe embedding generation (admin only)
+ *
+ * @param force - If true, delete all embeddings and re-queue all tracks
+ */
+router.post("/vibe/start", requireAuth, requireAdmin, async (req, res) => {
+    try {
+        const { limit = 500, force = false } = req.body;
+
+        // If force mode, delete all existing embeddings first
+        if (force) {
+            await prisma.$executeRaw`DELETE FROM track_embeddings`;
+            await enrichmentFailureService.clearAllFailures("vibe");
+            logger.info("Cleared all vibe embeddings for re-generation");
+        }
+
+        // Find tracks without vibe embeddings (all tracks if force was used)
+        const tracks = await prisma.$queryRaw<{ id: string; filePath: string; duration: number; title: string }[]>`
+            SELECT t.id, t."filePath", t.duration, t.title
+            FROM "Track" t
+            LEFT JOIN track_embeddings te ON t.id = te.track_id
+            WHERE te.track_id IS NULL
+            AND t."filePath" IS NOT NULL
+            ORDER BY t."fileModified" DESC
+            LIMIT ${limit}
+        `;
+
+        if (tracks.length === 0) {
+            return res.json({
+                message: "All tracks have vibe embeddings",
+                queued: 0,
+            });
+        }
+
+        // Queue tracks for CLAP embedding
+        const pipeline = redisClient.multi();
+        for (const track of tracks) {
+            pipeline.rPush(VIBE_QUEUE, JSON.stringify({
+                trackId: track.id,
+                filePath: track.filePath,
+                duration: track.duration,
+            }));
+        }
+        await pipeline.exec();
+
+        // Clear any existing vibe failures for these tracks
+        for (const track of tracks) {
+            await enrichmentFailureService.clearFailure("vibe", track.id);
+        }
+
+        logger.info(`Queued ${tracks.length} tracks for vibe embedding${force ? " (force reset)" : ""}`);
+
+        res.json({
+            message: `Queued ${tracks.length} tracks for vibe embedding`,
+            queued: tracks.length,
+        });
+    } catch (error: any) {
+        logger.error("Start vibe embedding error:", error);
+        res.status(500).json({ error: "Failed to start vibe embedding" });
+    }
+});
+
+/**
+ * POST /api/analysis/vibe/retry
+ * Retry failed vibe embeddings (admin only)
+ */
+router.post("/vibe/retry", requireAuth, requireAdmin, async (req, res) => {
+    try {
+        // Get all vibe failures
+        const { failures } = await enrichmentFailureService.getFailures({
+            entityType: "vibe",
+            includeSkipped: false,
+            includeResolved: false,
+        });
+
+        if (failures.length === 0) {
+            return res.json({
+                message: "No vibe failures to retry",
+                queued: 0,
+            });
+        }
+
+        // Get track details for failed tracks
+        const trackIds = failures.map(f => f.entityId);
+        const tracks = await prisma.track.findMany({
+            where: { id: { in: trackIds } },
+            select: { id: true, filePath: true, duration: true, title: true },
+        });
+
+        // Queue for retry
+        const pipeline = redisClient.multi();
+        for (const track of tracks) {
+            pipeline.rPush(VIBE_QUEUE, JSON.stringify({
+                trackId: track.id,
+                filePath: track.filePath,
+                duration: track.duration,
+            }));
+        }
+        await pipeline.exec();
+
+        // Reset retry counts
+        await enrichmentFailureService.resetRetryCount(failures.map(f => f.id));
+
+        logger.info(`Retrying ${tracks.length} failed vibe embeddings`);
+
+        res.json({
+            message: `Queued ${tracks.length} failed tracks for vibe embedding retry`,
+            queued: tracks.length,
+        });
+    } catch (error: any) {
+        logger.error("Retry vibe failures error:", error);
+        res.status(500).json({ error: "Failed to retry vibe failures" });
     }
 });
 
