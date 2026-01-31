@@ -261,12 +261,6 @@ services:
                     cpus: "4"
                 reservations:
                     memory: 2G
-        # Disabled by default - enable when needed
-        # Profiles: analysis (MusicCNN only), vibe/full (both analyzers)
-        profiles:
-            - analysis
-            - vibe
-            - full
         healthcheck:
             test: ["CMD", "pgrep", "-f", "python.*analyzer"]
             interval: 30s
@@ -299,6 +293,7 @@ services:
                 condition: service_healthy
             audio-analyzer:
                 condition: service_healthy
+                required: false  # Allow CLAP to start even if MusicCNN is disabled
         restart: unless-stopped
         deploy:
             resources:
@@ -308,10 +303,6 @@ services:
                     cpus: "4"
                 reservations:
                     memory: 1G
-        # Profiles: vibe/full (CLAP requires MusicCNN analysis first)
-        profiles:
-            - vibe
-            - full
 
 volumes:
     # Lidify core
