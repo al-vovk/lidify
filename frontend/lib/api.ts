@@ -1809,6 +1809,7 @@ class ApiClient {
                 duration: number;
                 trackNo: number;
                 distance: number;
+                similarity: number;
                 album: {
                     id: string;
                     title: string;
@@ -1819,6 +1820,13 @@ class ApiClient {
                     name: string;
                 };
             }>;
+            minSimilarity: number;
+            totalAboveThreshold: number;
+            debug?: {
+                matchedTerms: string[];
+                genreConfidence: number;
+                featureWeight: number;
+            };
         }>("/vibe/search", {
             method: "POST",
             body: JSON.stringify({ query, limit }),
