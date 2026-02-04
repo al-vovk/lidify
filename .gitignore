@@ -414,6 +414,9 @@ issues/
 plans/
 systems/
 
+# Development worktrees (keep locally, don't commit)
+.worktrees/
+
 # =============================================================================
 # Development/Debug Test Files (keep locally, don't push to GitHub)
 AGENTS.md
