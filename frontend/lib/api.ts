@@ -1621,6 +1621,7 @@ class ApiClient {
                 total: number;
                 completed: number;
                 pending: number;
+                processing: number;
                 failed: number;
                 progress: number;
                 isBackground: boolean;

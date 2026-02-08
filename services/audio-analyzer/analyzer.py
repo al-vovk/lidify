@@ -130,6 +130,53 @@ BRPOP_TIMEOUT = max(5, int(os.getenv('BRPOP_TIMEOUT', str(SLEEP_INTERVAL))))
 # Models are reloaded automatically when new work arrives
 MODEL_IDLE_TIMEOUT = int(os.getenv('MODEL_IDLE_TIMEOUT', '300'))
 
+# Debounce delay for worker resize (seconds) -- prevents pool churn when user drags a slider
+RESIZE_DEBOUNCE_SECONDS = 5
+
+
+class DatabaseConnection:
+    """PostgreSQL connection manager"""
+
+    def __init__(self, url: str):
+        self.url = url
+        self.conn = None
+
+    def connect(self):
+        """Establish database connection with explicit UTF-8 encoding"""
+        if not self.url:
+            raise ValueError("DATABASE_URL not set")
+
+        self.conn = psycopg2.connect(
+            self.url,
+            options="-c client_encoding=UTF8"
+        )
+        self.conn.set_client_encoding('UTF8')
+        self.conn.autocommit = False
+        logger.info("Connected to PostgreSQL with UTF-8 encoding")
+
+    def get_cursor(self):
+        """Get a database cursor"""
+        if not self.conn:
+            self.connect()
+        return self.conn.cursor(cursor_factory=RealDictCursor)
+
+    def commit(self):
+        """Commit transaction"""
+        if self.conn:
+            self.conn.commit()
+
+    def rollback(self):
+        """Rollback transaction"""
+        if self.conn:
+            self.conn.rollback()
+
+    def close(self):
+        """Close connection"""
+        if self.conn:
+            self.conn.close()
+            self.conn = None
+
+
 def _get_workers_from_db() -> int:
     """
     Fetch worker count from SystemSettings table.
@@ -210,50 +257,6 @@ if TF_MODELS_AVAILABLE:
     logger.info(f"MusiCNN model files found at {MODEL_DIR}")
 else:
     logger.info(f"MusiCNN model files not found at {MODEL_DIR} - Standard mode only")
-
-class DatabaseConnection:
-    """PostgreSQL connection manager"""
-    
-    def __init__(self, url: str):
-        self.url = url
-        self.conn = None
-    
-    def connect(self):
-        """Establish database connection with explicit UTF-8 encoding"""
-        if not self.url:
-            raise ValueError("DATABASE_URL not set")
-        
-        # Ensure UTF-8 encoding for international file paths (Issue #6 fix)
-        self.conn = psycopg2.connect(
-            self.url,
-            options="-c client_encoding=UTF8"
-        )
-        self.conn.set_client_encoding('UTF8')
-        self.conn.autocommit = False
-        logger.info("Connected to PostgreSQL with UTF-8 encoding")
-    
-    def get_cursor(self):
-        """Get a database cursor"""
-        if not self.conn:
-            self.connect()
-        return self.conn.cursor(cursor_factory=RealDictCursor)
-    
-    def commit(self):
-        """Commit transaction"""
-        if self.conn:
-            self.conn.commit()
-    
-    def rollback(self):
-        """Rollback transaction"""
-        if self.conn:
-            self.conn.rollback()
-    
-    def close(self):
-        """Close connection"""
-        if self.conn:
-            self.conn.close()
-            self.conn = None
-
 
 class AudioAnalyzer:
     """
@@ -1037,6 +1040,8 @@ class AnalysisWorker:
         self.is_paused = False  # Enrichment control: pause state
         self.pubsub = None  # Redis pub/sub for control signals
         self._last_work_time = time.time()
+        self._pending_resize: int | None = None
+        self._pending_resize_time: float = 0.0
         self._setup_control_channel()
     
     def _setup_control_channel(self):
@@ -1065,7 +1070,10 @@ class AnalysisWorker:
                     if isinstance(cmd, dict) and cmd.get('command') == 'set_workers':
                         new_count = int(cmd.get('count', NUM_WORKERS))
                         new_count = max(1, min(8, new_count))
-                        self._resize_worker_pool(new_count)
+                        if new_count != NUM_WORKERS:
+                            self._pending_resize = new_count
+                            self._pending_resize_time = time.time()
+                            logger.info(f"Worker resize queued: {NUM_WORKERS} -> {new_count} (applying in {RESIZE_DEBOUNCE_SECONDS}s)")
                         return
                 except (json.JSONDecodeError, ValueError):
                     pass  # Not JSON, try as plain string
@@ -1085,6 +1093,17 @@ class AnalysisWorker:
         except Exception as e:
             logger.warning(f"Error checking control signals: {e}")
     
+    def _apply_pending_resize(self):
+        """Apply buffered resize if debounce period has elapsed."""
+        if self._pending_resize is None:
+            return
+        elapsed = time.time() - self._pending_resize_time
+        if elapsed < RESIZE_DEBOUNCE_SECONDS:
+            return
+        target = self._pending_resize
+        self._pending_resize = None
+        self._resize_worker_pool(target)
+
     def _resize_worker_pool(self, new_count: int):
         """
         Resize the worker pool to a new count.
@@ -1166,6 +1185,12 @@ class AnalysisWorker:
         self.executor = None
         self.pool_active = False
         gc.collect()
+        # Force glibc to return freed pages to OS (Python/PyTorch hold RSS otherwise)
+        try:
+            import ctypes
+            ctypes.CDLL("libc.so.6").malloc_trim(0)
+        except Exception:
+            pass
         logger.info("Worker pool shut down (will restart when work arrives)")
 
     def _recreate_pool(self):
@@ -1312,11 +1337,14 @@ class AnalysisWorker:
         finally:
             cursor.close()
     
-    def _run_db_reconciliation(self):
+    def _run_db_reconciliation(self) -> bool:
         """
         Check database for pending tracks that may have been missed by Redis queue.
         Handles edge cases: manual DB edits, crash recovery, queue loss.
-        Pushes found tracks into the Redis queue so BRPOP picks them up.
+        Marks tracks as 'processing' in DB first (prevents backend double-queuing),
+        then pushes them into the Redis queue so BRPOP picks them up.
+
+        Returns True if pending work was found, False if nothing to do.
         """
         cursor = self.db.get_cursor()
         try:
@@ -1332,6 +1360,14 @@ class AnalysisWorker:
             tracks = cursor.fetchall()
             if tracks:
                 logger.info(f"DB reconciliation found {len(tracks)} pending tracks, queuing...")
+                track_ids = [t['id'] for t in tracks]
+                cursor.execute("""
+                    UPDATE "Track"
+                    SET "analysisStatus" = 'processing',
+                        "analysisStartedAt" = NOW()
+                    WHERE id = ANY(%s)
+                """, (track_ids,))
+                self.db.commit()
                 pipe = self.redis.pipeline()
                 for t in tracks:
                     pipe.rpush(ANALYSIS_QUEUE, json.dumps({
@@ -1339,9 +1375,12 @@ class AnalysisWorker:
                         'filePath': t['filePath']
                     }))
                 pipe.execute()
+                return True
+            return False
         except Exception as e:
             logger.error(f"DB reconciliation failed: {e}")
             self.db.rollback()
+            return False
         finally:
             cursor.close()
 
@@ -1384,8 +1423,9 @@ class AnalysisWorker:
                     except Exception:
                         pass
 
-                    # Check for control signals (pause/resume/stop)
+                    # Check for control signals (pause/resume/stop/set_workers)
                     self._check_control_signals()
+                    self._apply_pending_resize()
 
                     if self.is_paused:
                         logger.debug("Audio analysis paused, waiting for resume signal...")
@@ -1401,13 +1441,19 @@ class AnalysisWorker:
                     else:
                         # BRPOP timed out -- run periodic maintenance
                         self.consecutive_empty += 1
-                        self._run_db_reconciliation()
+                        found_work = self._run_db_reconciliation()
 
-                        # Check if models should be unloaded due to idle
-                        idle_seconds = time.time() - self._last_work_time
-                        if idle_seconds >= MODEL_IDLE_TIMEOUT and self.pool_active:
-                            self._shutdown_pool()
-                            logger.info(f"Models idle for {idle_seconds:.0f}s, pool shut down")
+                        # Unload models when idle: immediately if DB has no pending
+                        # work, or after MODEL_IDLE_TIMEOUT as a fallback
+                        if self.pool_active and not found_work:
+                            idle_seconds = time.time() - self._last_work_time
+                            if idle_seconds >= MODEL_IDLE_TIMEOUT:
+                                self._shutdown_pool()
+                                logger.info(f"Models idle for {idle_seconds:.0f}s, pool shut down")
+                            elif idle_seconds >= BRPOP_TIMEOUT:
+                                # No pending work in DB and queue empty -- unload now
+                                self._shutdown_pool()
+                                logger.info("All work complete, pool shut down (will restart when work arrives)")
 
                         # Periodic cleanup every IDLE_SHUTDOWN_CYCLES timeouts
                         if self.consecutive_empty >= self.IDLE_SHUTDOWN_CYCLES:

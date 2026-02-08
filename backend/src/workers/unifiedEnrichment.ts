@@ -887,7 +887,7 @@ async function queueAudioAnalysis(): Promise<number> {
             title: true,
             duration: true,
         },
-        take: 50, // Queue more at once since Essentia processes async
+        take: 10, // Match analyzer batch size to avoid stale "processing" buildup
         orderBy: { fileModified: "desc" },
     });
 
@@ -1182,15 +1182,20 @@ export async function getEnrichmentProgress() {
     });
 
     // CLAP embedding progress (for vibe similarity)
-    const clapEmbeddingCount = await prisma.$queryRaw<{ count: bigint }[]>`
-        SELECT COUNT(*) as count FROM track_embeddings
-    `;
+    const [clapEmbeddingCount, clapProcessing, clapQueueLength, clapFailedCount] = await Promise.all([
+        prisma.$queryRaw<{ count: bigint }[]>`
+            SELECT COUNT(*) as count FROM track_embeddings
+        `,
+        prisma.track.count({
+            where: { vibeAnalysisStatus: "processing" },
+        }),
+        getRedis().llen("audio:clap:queue"),
+        prisma.enrichmentFailure.count({
+            where: { entityType: "vibe", resolved: false, skipped: false },
+        }),
+    ]);
     const clapCompleted = Number(clapEmbeddingCount[0]?.count || 0);
-
-    // CLAP/Vibe failure count
-    const clapFailed = await prisma.enrichmentFailure.count({
-        where: { entityType: "vibe", resolved: false, skipped: false },
-    });
+    const clapFailed = clapFailedCount;
 
     // Core enrichment is complete when artists and track tags are done
     // Audio analysis is separate - it runs in background and doesn't block
@@ -1240,6 +1245,7 @@ export async function getEnrichmentProgress() {
             total: trackTotal,
             completed: clapCompleted,
             pending: trackTotal - clapCompleted - clapFailed,
+            processing: clapProcessing,
             failed: clapFailed,
             progress:
                 trackTotal > 0 ?
@@ -1254,6 +1260,8 @@ export async function getEnrichmentProgress() {
             coreComplete &&
             audioPending === 0 &&
             audioProcessing === 0 &&
+            clapProcessing === 0 &&
+            clapQueueLength === 0 &&
             clapCompleted + clapFailed >= trackTotal,
     };
 }
