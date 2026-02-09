@@ -5,6 +5,12 @@ All notable changes to Lidify will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.3] - 2026-02-08
+
+### Fixed
+
+- **Backend unresponsiveness after hours of uptime:** Replaced `setInterval` with self-rescheduling `setTimeout` for the 2-minute reconciliation cycle and 5-minute Lidarr cleanup cycle in `workers/index.ts`. Previously, `setInterval` fired unconditionally every 2/5 minutes regardless of whether the previous cycle had completed. Since `withTimeout()` resolves via `Promise.race` but never cancels the underlying operation, timed-out operations continued running as zombies. Over hours, hundreds of concurrent zombie operations accumulated, starving the event loop and exhausting database connections and network sockets. Each cycle now waits for the previous one to fully complete before scheduling the next, making pile-up impossible.
+
 ## [1.4.2] - 2026-02-07
 
 ### Added
