@@ -146,7 +146,6 @@ interface AudioStateContextType {
     repeatOneCount: number;
 
     // State setters (for controls context)
-    setCurrentTrack: (track: SetStateAction<Track | null>) => void;
     setCurrentAudiobook: (audiobook: SetStateAction<Audiobook | null>) => void;
     setCurrentPodcast: (podcast: SetStateAction<Podcast | null>) => void;
     setPlaybackType: (
@@ -203,9 +202,6 @@ function parseStorageJson<T>(key: string, fallback: T): T {
 }
 
 export function AudioStateProvider({ children }: { children: ReactNode }) {
-    const [currentTrack, setCurrentTrack] = useState<Track | null>(
-        () => parseStorageJson(STORAGE_KEYS.CURRENT_TRACK, null)
-    );
     const [currentAudiobook, setCurrentAudiobook] = useState<Audiobook | null>(
         () => parseStorageJson(STORAGE_KEYS.CURRENT_AUDIOBOOK, null)
     );
@@ -221,6 +217,15 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
     const [currentIndex, setCurrentIndex] = useState(
         () => { const v = readStorage(STORAGE_KEYS.CURRENT_INDEX); return v ? parseInt(v) : 0; }
     );
+
+    // Derive currentTrack from queue + currentIndex + playbackType.
+    // This eliminates desync bugs where currentTrack and currentIndex
+    // could point to different tracks when set as independent state.
+    const currentTrack: Track | null = useMemo(() => {
+        if (playbackType !== "track") return null;
+        return queue[currentIndex] ?? null;
+    }, [playbackType, queue, currentIndex]);
+
     const [isShuffle, setIsShuffle] = useState(
         () => readStorage(STORAGE_KEYS.IS_SHUFFLE) === "true"
     );
@@ -319,23 +324,11 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                     serverState.playbackType === "track" &&
                     serverState.trackId
                 ) {
-                    api.getTrack(serverState.trackId)
-                        .then((track) => {
-                            setCurrentTrack(track);
-                            setPlaybackType("track");
-                            setCurrentAudiobook(null);
-                            setCurrentPodcast(null);
-                        })
-                        .catch(() => {
-                            // Fire-and-forget: clearing stale server state, failure is non-critical
-                            api.clearPlaybackState().catch(() => {});
-                            setCurrentTrack(null);
-                            setCurrentAudiobook(null);
-                            setCurrentPodcast(null);
-                            setPlaybackType(null);
-                            setQueue([]);
-                            setCurrentIndex(0);
-                        });
+                    // currentTrack is derived from queue[currentIndex], so just
+                    // set playbackType. The queue + index are set below.
+                    setPlaybackType("track");
+                    setCurrentAudiobook(null);
+                    setCurrentPodcast(null);
                 } else if (
                     serverState.playbackType === "audiobook" &&
                     serverState.audiobookId
@@ -344,7 +337,6 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                         (audiobook) => {
                             setCurrentAudiobook(audiobook);
                             setPlaybackType("audiobook");
-                            setCurrentTrack(null);
                             setCurrentPodcast(null);
                         }
                     );
@@ -368,7 +360,6 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                                 progress: episode.progress,
                             });
                             setPlaybackType("podcast");
-                            setCurrentTrack(null);
                             setCurrentAudiobook(null);
                         }
                     });
@@ -558,33 +549,18 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                         serverState.playbackType === "track" &&
                         serverState.trackId
                     ) {
-                        try {
-                            const track = await api.getTrack(
-                                serverState.trackId
-                            );
-                            if (!mounted) return;
-                            setCurrentTrack(track);
-                            setPlaybackType("track");
-                            setCurrentAudiobook(null);
-                            setCurrentPodcast(null);
-                            if (
-                                serverState.queue &&
-                                serverState.queue.length > 0
-                            ) {
-                                setQueue(serverState.queue);
-                                setCurrentIndex(serverState.currentIndex || 0);
-                                setIsShuffle(serverState.isShuffle || false);
-                            }
-                        } catch {
-                            if (!mounted) return;
-                            await api.clearPlaybackState().catch(() => {});
-                            setCurrentTrack(null);
-                            setCurrentAudiobook(null);
-                            setCurrentPodcast(null);
-                            setPlaybackType(null);
-                            setQueue([]);
-                            setCurrentIndex(0);
-                            return;
+                        // currentTrack is derived from queue[currentIndex],
+                        // so just set playbackType + queue + index.
+                        setPlaybackType("track");
+                        setCurrentAudiobook(null);
+                        setCurrentPodcast(null);
+                        if (
+                            serverState.queue &&
+                            serverState.queue.length > 0
+                        ) {
+                            setQueue(serverState.queue);
+                            setCurrentIndex(serverState.currentIndex || 0);
+                            setIsShuffle(serverState.isShuffle || false);
                         }
                     } else if (
                         serverState.playbackType === "audiobook" &&
@@ -596,7 +572,6 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                         if (!mounted) return;
                         setCurrentAudiobook(audiobook);
                         setPlaybackType("audiobook");
-                        setCurrentTrack(null);
                         setCurrentPodcast(null);
                     } else if (
                         serverState.playbackType === "podcast" &&
@@ -619,7 +594,6 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                                 progress: episode.progress,
                             });
                             setPlaybackType("podcast");
-                            setCurrentTrack(null);
                             setCurrentAudiobook(null);
                         }
                     }
@@ -697,7 +671,6 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
             isHydrated,
             lastServerSync,
             repeatOneCount,
-            setCurrentTrack,
             setCurrentAudiobook,
             setCurrentPodcast,
             setPlaybackType,

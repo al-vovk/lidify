@@ -178,8 +178,8 @@ export function useMediaSession() {
 
     // Bridge back to React — used by skip handlers where intent is always
     // "play this new track from the start". Uses refs so it has stable identity.
-    const syncReactState = useCallback((track: Track, index: number) => {
-        stateRef.current.setCurrentTrack(track);
+    const syncReactState = useCallback((_track: Track, index: number) => {
+        // currentTrack is derived from queue[currentIndex], so only set index
         stateRef.current.setCurrentIndex(index);
         playbackRef.current.setCurrentTime(0);
         playbackRef.current.setIsPlaying(true);
@@ -448,11 +448,10 @@ export function useMediaSession() {
             playbackRef.current.setIsPlaying(audioEngine.isPlaying());
             playbackRef.current.setCurrentTime(audioEngine.getCurrentTime());
 
-            // Track-specific: sync current track and index from refs
-            const track = currentTrackRef.current;
+            // Track-specific: sync current index from refs
+            // (currentTrack is derived from queue[currentIndex])
             const idx = currentIndexRef.current;
-            if (track && playbackTypeRef.current === "track") {
-                stateRef.current.setCurrentTrack(track);
+            if (playbackTypeRef.current === "track") {
                 stateRef.current.setCurrentIndex(idx);
             }
         }

@@ -83,7 +83,6 @@ export const AudioElement = memo(function AudioElement() {
         isMuted,
         repeatMode,
         setCurrentAudiobook,
-        setCurrentTrack,
         setCurrentPodcast,
         setPlaybackType,
         queue,
@@ -335,7 +334,7 @@ export const AudioElement = memo(function AudioElement() {
                 if (queueRef.current.length > 1) {
                     nextRef.current();
                 } else {
-                    setCurrentTrack(null);
+                    // Setting playbackType to null makes derived currentTrack null
                     setPlaybackType(null);
                 }
             } else if (playbackType === "audiobook") {
@@ -392,7 +391,7 @@ export const AudioElement = memo(function AudioElement() {
             audioEngine.off("pause", handlePause);
             audioEngine.off("stop", handleStop);
         };
-    }, [playbackType, currentTrack, currentAudiobook, currentPodcast, repeatMode, setCurrentTimeFromEngine, setDuration, setIsPlaying, setIsBuffering, setCurrentTrack, setCurrentAudiobook, setCurrentPodcast, setPlaybackType]);
+    }, [playbackType, currentTrack, currentAudiobook, currentPodcast, repeatMode, setCurrentTimeFromEngine, setDuration, setIsPlaying, setIsBuffering, setCurrentAudiobook, setCurrentPodcast, setPlaybackType]);
 
     useEffect(() => {
         const currentMediaId =
@@ -425,7 +424,26 @@ export const AudioElement = memo(function AudioElement() {
             return;
         }
 
-        if (isLoadingRef.current) return;
+        // If a previous track is still loading, cancel it and proceed with
+        // the new track. The loadId check in handleLoaded will discard the
+        // stale load's callback, and audioEngine.load() will cleanup the old
+        // Audio element synchronously.
+        if (isLoadingRef.current) {
+            console.log("[AudioElement] New track arrived during load, cancelling previous");
+            isLoadingRef.current = false;
+            if (loadingTimeoutRef.current) {
+                clearTimeout(loadingTimeoutRef.current);
+                loadingTimeoutRef.current = null;
+            }
+            if (loadListenerRef.current) {
+                audioEngine.off("load", loadListenerRef.current);
+                loadListenerRef.current = null;
+            }
+            if (loadErrorListenerRef.current) {
+                audioEngine.off("loaderror", loadErrorListenerRef.current);
+                loadErrorListenerRef.current = null;
+            }
+        }
 
         // Check if the engine already has this track loaded (e.g., MediaSession
         // handler loaded it directly in the background). Skip the load to

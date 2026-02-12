@@ -193,7 +193,6 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             }
             
             state.setPlaybackType("track");
-            state.setCurrentTrack(track);
             state.setCurrentAudiobook(null);
             state.setCurrentPodcast(null);
             state.setPodcastEpisodeQueue(null); // Clear podcast queue when playing tracks
@@ -233,7 +232,6 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             state.setPodcastEpisodeQueue(null); // Clear podcast queue when playing tracks
             state.setQueue(tracks);
             state.setCurrentIndex(startIndex);
-            state.setCurrentTrack(tracks[startIndex]);
             playback.setIsPlaying(true);
             playback.setCurrentTime(0);
             state.setRepeatOneCount(0);
@@ -248,7 +246,6 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         (audiobook: Audiobook) => {
             state.setPlaybackType("audiobook");
             state.setCurrentAudiobook(audiobook);
-            state.setCurrentTrack(null);
             state.setCurrentPodcast(null);
             state.setPodcastEpisodeQueue(null); // Clear podcast queue when playing audiobooks
             state.setQueue([]);
@@ -269,7 +266,6 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         (podcast: Podcast) => {
             state.setPlaybackType("podcast");
             state.setCurrentPodcast(podcast);
-            state.setCurrentTrack(null);
             state.setCurrentAudiobook(null);
             state.setQueue([]);
             state.setCurrentIndex(0);
@@ -395,7 +391,6 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             queueLen: state.queue.length,
         });
         state.setCurrentIndex(nextIndex);
-        state.setCurrentTrack(state.queue[nextIndex]);
         playback.setCurrentTime(0);
         playback.setIsPlaying(true);
     }, [state, playback]);
@@ -424,7 +419,6 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         }
 
         state.setCurrentIndex(prevIndex);
-        state.setCurrentTrack(state.queue[prevIndex]);
         playback.setCurrentTime(0);
         playback.setIsPlaying(true);
     }, [state, playback]);
@@ -445,7 +439,6 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 state.setPlaybackType("track");
                 state.setQueue([track]);
                 state.setCurrentIndex(0);
-                state.setCurrentTrack(track);
                 state.setCurrentAudiobook(null);
                 state.setCurrentPodcast(null);
                 playback.setIsPlaying(true);
@@ -546,10 +539,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                     index === newQueue.length
                 ) {
                     state.setCurrentIndex(0);
-                    if (newQueue.length > 0) {
-                        state.setCurrentTrack(newQueue[0]);
-                    } else {
-                        state.setCurrentTrack(null);
+                    if (newQueue.length === 0) {
                         playback.setIsPlaying(false);
                     }
                 }
@@ -572,7 +562,6 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
     const clearQueue = useCallback(() => {
         state.setQueue([]);
         state.setCurrentIndex(0);
-        state.setCurrentTrack(null);
         playback.setIsPlaying(false);
         state.setShuffleIndices([]);
     }, [state, playback]);
@@ -586,7 +575,6 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 if (tracks.length > 0) {
                     state.setQueue(tracks);
                     state.setCurrentIndex(0);
-                    state.setCurrentTrack(tracks[0]);
                     state.setPlaybackType("track");
                     playback.setIsPlaying(true);
                     playback.setCurrentTime(0);
