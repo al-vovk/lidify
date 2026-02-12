@@ -5,8 +5,10 @@
  * Direct control over the <audio> element ensures proper integration
  * with OS-level media controls (lock screen, now playing, media keys).
  *
- * Two <audio> elements: active playback + preloaded next track.
- * On track switch, preloaded element becomes active (no re-fetch).
+ * Single <audio> element for playback. Next track prefetched via fetch()
+ * to warm HTTP cache (avoids second <audio> element that interferes with
+ * MediaSession on macOS — browser tracks all media elements and a paused
+ * preload element can flip the Now Playing state to "paused").
  */
 
 export type AudioEventType =
@@ -22,16 +24,6 @@ export type AudioEventType =
     | "timeupdate";
 
 export type AudioEventCallback = (data?: unknown) => void;
-
-/** Detect audio format from file extension (for API compat — native <audio> ignores this) */
-export function detectAudioFormat(filePath: string | undefined): string {
-    const ext = filePath?.split(".").pop()?.toLowerCase();
-    if (ext === "flac") return "flac";
-    if (ext === "m4a" || ext === "aac") return "mp4";
-    if (ext === "ogg" || ext === "opus") return "webm";
-    if (ext === "wav") return "wav";
-    return "mp3";
-}
 
 interface AudioEngineState {
     currentSrc: string | null;
@@ -61,9 +53,8 @@ class AudioEngine {
     private seekTargetTime: number | null = null;
     private seekTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
-    private preloadAudio: HTMLAudioElement | null = null;
     private preloadSrc: string | null = null;
-    private preloadReady: boolean = false;
+    private preloadAbortController: AbortController | null = null;
 
     private readonly popFadeMs: number = 10;
     private pendingAutoplay: boolean = false;
@@ -83,7 +74,7 @@ class AudioEngine {
 
         // Declare playback intent so the OS treats this as a music app.
         // Bypasses silent/mute switch and grants higher background audio priority.
-        // W3C Audio Session API (WebKit 17+, other browsers may vary).
+        // W3C Audio Session API (Safari 16.4+, other browsers may vary).
         try {
             const nav = navigator as unknown as Record<string, unknown>;
             if (nav.audioSession) {
@@ -105,9 +96,7 @@ class AudioEngine {
     }
 
     /** Load and optionally play a new audio source */
-    load(src: string, autoplay: boolean = false, format?: string): void {
-        void format; // kept for API compat, <audio> detects format automatically
-
+    load(src: string, autoplay: boolean = false): void {
         if (this.state.currentSrc === src && this.audio) {
             if (autoplay && !this.state.isPlaying) {
                 this.play();
@@ -119,26 +108,10 @@ class AudioEngine {
             return;
         }
 
-        if (this.isPreloaded(src)) {
-            const preloadedAudio = this.preloadAudio!;
-            this.preloadAudio = null;
-            this.preloadSrc = null;
-            this.preloadReady = false;
-
-            this.cleanup(true);
-
-            this.audio = preloadedAudio;
-            this.attachEventListeners(this.audio);
-            this.state.currentSrc = src;
-            this.state.duration = this.audio.duration || 0;
-            this.isLoading = false;
-            this.applyVolume(this.audio);
-
-            this.emit("load", { duration: this.state.duration });
-            if (autoplay) {
-                this.play();
-            }
-            return;
+        // If loading a URL that was prefetched via fetch(), don't abort its
+        // download — let it complete so the data stays in HTTP cache.
+        if (this.preloadSrc === src && this.preloadAbortController) {
+            this.preloadAbortController = null;
         }
 
         this.isLoading = true;
@@ -155,9 +128,6 @@ class AudioEngine {
 
         this.audio.src = src;
     }
-
-    /** No-op — kept for API compat. Future crossfade via AudioContext would go here. */
-    async resumeAudioContext(): Promise<void> {}
 
     /** Force play — syncs engine state if OS already resumed playback, otherwise plays */
     forcePlay(): void {
@@ -187,7 +157,11 @@ class AudioEngine {
 
         this.applyVolume(this.audio);
 
+        const audioEl = this.audio;
         this.audio.play().catch(err => {
+            // Ignore errors from stale audio elements (user skipped track)
+            if (this.audio !== audioEl) return;
+
             console.error("[AudioEngine] Play error:", err);
             this.state.isPlaying = false;
             this.stopTimeUpdates();
@@ -197,8 +171,15 @@ class AudioEngine {
 
     /** Pause audio */
     pause(): void {
-        if (!this.audio || this.audio.paused) return;
-        this.audio.pause();
+        if (!this.audio) return;
+        if (!this.audio.paused) {
+            this.audio.pause(); // triggers native pause event → onPause handler emits
+        } else if (this.state.isPlaying) {
+            // Audio already paused (e.g. by browser/OS), sync engine state
+            this.state.isPlaying = false;
+            this.stopTimeUpdates();
+            this.emit("pause");
+        }
     }
 
     /** Stop playback completely */
@@ -251,55 +232,47 @@ class AudioEngine {
         this.load(src, false);
     }
 
-    /** Preload a track in the background for gapless playback */
-    preload(src: string, format?: string): void {
-        void format;
-
+    /**
+     * Prefetch a track via fetch() to warm the browser's HTTP cache.
+     * When load() is called for this URL, the <audio> element will load
+     * from cache instead of the network (fast, near-instant).
+     *
+     * Uses fetch() instead of a second <audio> element because browsers
+     * track all media elements for MediaSession — a paused preload
+     * <audio> causes macOS Now Playing to flip to "paused".
+     */
+    preload(src: string): void {
         if (this.state.currentSrc === src) return;
         if (this.preloadSrc === src) return;
 
         this.cancelPreload();
 
         this.preloadSrc = src;
-        this.preloadReady = false;
+        this.preloadAbortController = new AbortController();
 
-        this.preloadAudio = new Audio();
-        this.preloadAudio.preload = 'auto';
-        this.preloadAudio.src = src;
-
-        this.preloadAudio.addEventListener('canplaythrough', () => {
-            this.preloadReady = true;
-        }, { once: true });
-
-        this.preloadAudio.addEventListener('error', () => {
-            console.error("[AudioEngine] Preload error for:", src);
-            this.cancelPreload();
-        }, { once: true });
+        fetch(src, { signal: this.preloadAbortController.signal })
+            .then(response => {
+                if (!response.ok) throw new Error(`Preload failed: ${response.status}`);
+                // Read full response to ensure it's in HTTP cache
+                return response.blob();
+            })
+            .catch(err => {
+                if (err.name !== 'AbortError') {
+                    console.error("[AudioEngine] Preload error for:", src);
+                }
+                if (this.preloadSrc === src) {
+                    this.preloadSrc = null;
+                }
+            });
     }
 
     /** Cancel any in-progress preload */
     cancelPreload(): void {
-        if (this.preloadAudio) {
-            try {
-                this.preloadAudio.pause();
-                this.preloadAudio.removeAttribute('src');
-                this.preloadAudio.load();
-            } catch {
-                // Intentionally ignored: cleanup errors are harmless
-            }
-            this.preloadAudio = null;
+        if (this.preloadAbortController) {
+            this.preloadAbortController.abort();
+            this.preloadAbortController = null;
         }
         this.preloadSrc = null;
-        this.preloadReady = false;
-    }
-
-    /** Check if a source is preloaded and ready */
-    isPreloaded(src: string): boolean {
-        return (
-            this.preloadSrc === src &&
-            this.preloadAudio !== null &&
-            this.preloadReady
-        );
     }
 
     /** Set volume (0-1) */
@@ -330,11 +303,6 @@ class AudioEngine {
     /** Get current time from the audio element */
     getCurrentTime(): number {
         return this.audio?.currentTime || 0;
-    }
-
-    /** Alias for getCurrentTime() — kept for API compat (Howler had diverging times) */
-    getActualCurrentTime(): number {
-        return this.getCurrentTime();
     }
 
     /** Get duration */

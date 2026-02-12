@@ -4,7 +4,7 @@ import { useAudioState } from "@/lib/audio-state-context";
 import { useAudioPlayback } from "@/lib/audio-playback-context";
 import { useAudioControls } from "@/lib/audio-controls-context";
 import { api } from "@/lib/api";
-import { audioEngine, detectAudioFormat } from "@/lib/audio-engine";
+import { audioEngine } from "@/lib/audio-engine";
 import { audioSeekEmitter } from "@/lib/audio-seek-emitter";
 import { dispatchQueryEvent } from "@/lib/query-events";
 import {
@@ -110,10 +110,8 @@ export const AudioElement = memo(function AudioElement() {
     const lastPlayingStateRef = useRef<boolean>(isPlaying);
     const progressSaveIntervalRef = useRef<NodeJS.Timeout | null>(null);
     const lastProgressSaveRef = useRef<number>(0);
-    const isUserInitiatedRef = useRef<boolean>(false);
     const isLoadingRef = useRef<boolean>(false);
     const loadIdRef = useRef<number>(0);
-    const cachePollingRef = useRef<NodeJS.Timeout | null>(null);
     const seekCheckTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const cacheStatusPollingRef = useRef<NodeJS.Timeout | null>(null);
     const seekReloadListenerRef = useRef<(() => void) | null>(null);
@@ -121,7 +119,6 @@ export const AudioElement = memo(function AudioElement() {
     const isSeekingRef = useRef<boolean>(false);
     const loadListenerRef = useRef<(() => void) | null>(null);
     const loadErrorListenerRef = useRef<(() => void) | null>(null);
-    const cachePollingLoadListenerRef = useRef<(() => void) | null>(null);
     const seekOperationIdRef = useRef<number>(0);
     const seekDebounceRef = useRef<NodeJS.Timeout | null>(null);
     const pendingSeekTimeRef = useRef<number | null>(null);
@@ -267,6 +264,15 @@ export const AudioElement = memo(function AudioElement() {
         [currentPodcast, isBuffering]
     );
 
+    // Stable refs for callbacks used in event subscription effect
+    // Prevents 4Hz effect churn from playback context identity changes
+    const pauseRef = useRef(pause);
+    const nextRef = useRef(next);
+    const nextPodcastEpisodeRef = useRef(nextPodcastEpisode);
+    const saveAudiobookProgressRef = useRef(saveAudiobookProgress);
+    const savePodcastProgressRef = useRef(savePodcastProgress);
+    const queueRef = useRef(queue);
+
     useEffect(() => {
         const handleTimeUpdate = (data: { time: number }) => {
             setCurrentTimeFromEngine(data.time);
@@ -288,24 +294,24 @@ export const AudioElement = memo(function AudioElement() {
 
         const handleEnd = () => {
             if (playbackType === "audiobook" && currentAudiobook) {
-                saveAudiobookProgress(true);
+                saveAudiobookProgressRef.current(true);
             } else if (playbackType === "podcast" && currentPodcast) {
-                savePodcastProgress(true);
+                savePodcastProgressRef.current(true);
             }
 
             if (playbackType === "podcast") {
-                nextPodcastEpisode();
+                nextPodcastEpisodeRef.current();
             } else if (playbackType === "audiobook") {
-                pause();
+                pauseRef.current();
             } else if (playbackType === "track") {
                 if (repeatMode === "one") {
                     audioEngine.seek(0);
                     audioEngine.play();
                 } else {
-                    next();
+                    nextRef.current();
                 }
             } else {
-                pause();
+                pauseRef.current();
             }
         };
 
@@ -319,14 +325,13 @@ export const AudioElement = memo(function AudioElement() {
 
             setIsPlaying(false);
             setIsBuffering(false);
-            isUserInitiatedRef.current = false;
             heartbeatRef.current?.stop();
 
             if (playbackType === "track") {
                 lastTrackIdRef.current = null;
                 isLoadingRef.current = false;
-                if (queue.length > 1) {
-                    next();
+                if (queueRef.current.length > 1) {
+                    nextRef.current();
                 } else {
                     setCurrentTrack(null);
                     setPlaybackType(null);
@@ -342,11 +347,7 @@ export const AudioElement = memo(function AudioElement() {
 
         const handlePlay = () => {
             playbackStateMachine.transition("PLAYING");
-
-            if (!isUserInitiatedRef.current) {
-                setIsPlaying(true);
-            }
-            isUserInitiatedRef.current = false;
+            setIsPlaying(true);
         };
 
         const handlePause = () => {
@@ -356,11 +357,18 @@ export const AudioElement = memo(function AudioElement() {
             if (playbackStateMachine.isPlaying) {
                 playbackStateMachine.transition("READY");
             }
+            setIsPlaying(false);
+        };
 
-            if (!isUserInitiatedRef.current) {
-                setIsPlaying(false);
+        // Handle explicit stop — syncs React state immediately instead of
+        // waiting for the async native pause event (which may be guarded
+        // by isLoadingRef and never reach setIsPlaying).
+        const handleStop = () => {
+            if (playbackStateMachine.isPlaying || playbackStateMachine.isLoading) {
+                playbackStateMachine.forceTransition("IDLE");
             }
-            isUserInitiatedRef.current = false;
+            setIsPlaying(false);
+            heartbeatRef.current?.stop();
         };
 
         audioEngine.on("timeupdate", handleTimeUpdate);
@@ -370,6 +378,7 @@ export const AudioElement = memo(function AudioElement() {
         audioEngine.on("playerror", handleError);
         audioEngine.on("play", handlePlay);
         audioEngine.on("pause", handlePause);
+        audioEngine.on("stop", handleStop);
 
         return () => {
             audioEngine.off("timeupdate", handleTimeUpdate);
@@ -379,8 +388,9 @@ export const AudioElement = memo(function AudioElement() {
             audioEngine.off("playerror", handleError);
             audioEngine.off("play", handlePlay);
             audioEngine.off("pause", handlePause);
+            audioEngine.off("stop", handleStop);
         };
-    }, [playbackType, currentTrack, currentAudiobook, currentPodcast, repeatMode, next, nextPodcastEpisode, pause, setCurrentTimeFromEngine, setDuration, setIsPlaying, setIsBuffering, queue, setCurrentTrack, setCurrentAudiobook, setCurrentPodcast, setPlaybackType, saveAudiobookProgress, savePodcastProgress]);
+    }, [playbackType, currentTrack, currentAudiobook, currentPodcast, repeatMode, setCurrentTimeFromEngine, setDuration, setIsPlaying, setIsBuffering, setCurrentTrack, setCurrentAudiobook, setCurrentPodcast, setPlaybackType]);
 
     useEffect(() => {
         const currentMediaId =
@@ -467,13 +477,10 @@ export const AudioElement = memo(function AudioElement() {
                 0;
             setDuration(fallbackDuration);
 
-            const format = detectAudioFormat(currentTrack?.filePath);
-
-            audioEngine.load(streamUrl, false, format);
+            audioEngine.load(streamUrl, false);
             if (playbackType === "podcast" && currentPodcast) {
                 podcastDebugLog("audioEngine.load()", {
                     url: streamUrl,
-                    format,
                     loadId: thisLoadId,
                 });
             }
@@ -500,7 +507,7 @@ export const AudioElement = memo(function AudioElement() {
                         loadId: thisLoadId,
                         duration: audioEngine.getDuration(),
                         currentTime: audioEngine.getCurrentTime(),
-                        actualTime: audioEngine.getActualCurrentTime(),
+                        actualTime: audioEngine.getCurrentTime(),
                         startTime,
                         canSeek,
                     });
@@ -565,7 +572,7 @@ export const AudioElement = memo(function AudioElement() {
 
         preloadTimeoutRef.current = setTimeout(() => {
             const streamUrl = api.getStreamUrl(nextTrack.id);
-            audioEngine.preload(streamUrl, detectAudioFormat(nextTrack.filePath));
+            audioEngine.preload(streamUrl);
             lastPreloadedTrackIdRef.current = nextTrack.id;
         }, 2000);
 
@@ -648,12 +655,16 @@ export const AudioElement = memo(function AudioElement() {
 
     useLayoutEffect(() => {
         lastPlayingStateRef.current = isPlaying;
-    }, [isPlaying]);
+        pauseRef.current = pause;
+        nextRef.current = next;
+        nextPodcastEpisodeRef.current = nextPodcastEpisode;
+        saveAudiobookProgressRef.current = saveAudiobookProgress;
+        savePodcastProgressRef.current = savePodcastProgress;
+        queueRef.current = queue;
+    });
 
     useEffect(() => {
         if (isLoadingRef.current) return;
-
-        isUserInitiatedRef.current = true;
 
         if (isPlaying) {
             audioEngine.play();
@@ -690,22 +701,9 @@ export const AudioElement = memo(function AudioElement() {
                     seekCheckTimeoutRef.current = null;
                 }
 
-                if (cachePollingRef.current) {
-                    clearInterval(cachePollingRef.current);
-                    cachePollingRef.current = null;
-                }
-
                 if (seekReloadListenerRef.current) {
                     audioEngine.off("load", seekReloadListenerRef.current);
                     seekReloadListenerRef.current = null;
-                }
-
-                if (cachePollingLoadListenerRef.current) {
-                    audioEngine.off(
-                        "load",
-                        cachePollingLoadListenerRef.current
-                    );
-                    cachePollingLoadListenerRef.current = null;
                 }
 
                 if (seekDebounceRef.current) {
@@ -757,7 +755,7 @@ export const AudioElement = memo(function AudioElement() {
                                 }
 
                                 const actualPos =
-                                    audioEngine.getActualCurrentTime();
+                                    audioEngine.getCurrentTime();
                                 const seekSucceeded =
                                     Math.abs(actualPos - seekTime) < 5;
 
@@ -829,7 +827,7 @@ export const AudioElement = memo(function AudioElement() {
 
                         try {
                             const actualPos =
-                                audioEngine.getActualCurrentTime();
+                                audioEngine.getCurrentTime();
                             const seekFailed =
                                 Math.abs(actualPos - seekTime) > 5;
 
@@ -876,13 +874,10 @@ export const AudioElement = memo(function AudioElement() {
 
         const unsubscribe = audioSeekEmitter.subscribe(handleSeek);
         return unsubscribe;
-    }, [playbackType, currentPodcast, setIsBuffering, setIsPlaying]);
+    }, [playbackType, currentPodcast, setIsPlaying]);
 
     useEffect(() => {
         return () => {
-            if (cachePollingRef.current) {
-                clearInterval(cachePollingRef.current);
-            }
             if (seekCheckTimeoutRef.current) {
                 clearTimeout(seekCheckTimeoutRef.current);
             }
@@ -949,10 +944,6 @@ export const AudioElement = memo(function AudioElement() {
             if (loadErrorListenerRef.current) {
                 audioEngine.off("loaderror", loadErrorListenerRef.current);
                 loadErrorListenerRef.current = null;
-            }
-            if (cachePollingLoadListenerRef.current) {
-                audioEngine.off("load", cachePollingLoadListenerRef.current);
-                cachePollingLoadListenerRef.current = null;
             }
             if (preloadTimeoutRef.current) {
                 clearTimeout(preloadTimeoutRef.current);

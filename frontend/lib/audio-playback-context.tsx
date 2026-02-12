@@ -18,7 +18,6 @@ interface AudioPlaybackContextType {
     currentTime: number;
     duration: number;
     isBuffering: boolean;
-    targetSeekPosition: number | null;
     canSeek: boolean;
     downloadProgress: number | null; // 0-100 for downloading, null for not downloading
     isSeekLocked: boolean; // True when a seek operation is in progress
@@ -29,7 +28,6 @@ interface AudioPlaybackContextType {
     setCurrentTimeFromEngine: (time: number) => void; // For timeupdate events - respects seek lock
     setDuration: (duration: number) => void;
     setIsBuffering: (buffering: boolean) => void;
-    setTargetSeekPosition: (position: number | null) => void;
     setCanSeek: (canSeek: boolean) => void;
     setDownloadProgress: (progress: number | null) => void;
     lockSeek: (targetTime: number) => void; // Lock updates during seek
@@ -43,7 +41,6 @@ const AudioPlaybackContext = createContext<
 
 // LocalStorage keys
 const STORAGE_KEYS = {
-    IS_PLAYING: "lidify_is_playing",
     CURRENT_TIME: "lidify_current_time",
 };
 
@@ -58,9 +55,6 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     });
     const [duration, setDuration] = useState(0);
     const [isBuffering, setIsBuffering] = useState(false);
-    const [targetSeekPosition, setTargetSeekPosition] = useState<number | null>(
-        null
-    );
     const [canSeek, setCanSeek] = useState(true); // Default true for music, false for uncached podcasts
     const [downloadProgress, setDownloadProgress] = useState<number | null>(
         null
@@ -79,31 +73,29 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
         }
     }, []);
 
-    // Subscribe to state machine changes
+    // Subscribe to state machine changes.
+    // NOTE: isPlaying is NOT derived from the machine. It's set directly by
+    // AudioElement event handlers (handlePlay/handlePause/handleError/heartbeat).
+    // Letting the subscriber write isPlaying caused race conditions: LOADING→READY
+    // transitions set isPlaying=false, which triggered audioEngine.pause() via the
+    // isPlaying effect, cancelling audio that handleLoaded had just started playing.
     useEffect(() => {
         const unsubscribe = playbackStateMachine.subscribe((ctx) => {
             setPlaybackState(ctx.state);
 
-            // Derive isPlaying and isBuffering from state machine
-            // This creates a single source of truth
-            const machineIsPlaying = ctx.state === "PLAYING";
             const machineIsBuffering = ctx.state === "BUFFERING" || ctx.state === "LOADING";
-
-            // Only update if different to prevent unnecessary renders
-            setIsPlaying((prev) => prev !== machineIsPlaying ? machineIsPlaying : prev);
             setIsBuffering((prev) => prev !== machineIsBuffering ? machineIsBuffering : prev);
 
-            // Update error state
+            // Update error state (functional update avoids dep on audioError)
             if (ctx.state === "ERROR" && ctx.error) {
                 setAudioError(ctx.error);
-            } else if (ctx.state !== "ERROR" && audioError) {
-                // Clear error when leaving error state
-                setAudioError(null);
+            } else if (ctx.state !== "ERROR") {
+                setAudioError((prev) => prev !== null ? null : prev);
             }
         });
 
         return unsubscribe;
-    }, [audioError]);
+    }, []);
 
     // Seek lock state - prevents stale timeupdate events from overwriting optimistic UI updates
     const [isSeekLocked, setIsSeekLocked] = useState(false);
@@ -138,7 +130,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
         }
     }, []);
 
-    // setCurrentTimeFromEngine - for timeupdate events from Howler
+    // setCurrentTimeFromEngine - for timeupdate events from audio engine
     // Respects seek lock to prevent stale updates causing flicker
     const setCurrentTimeFromEngine = useCallback(
         (time: number) => {
@@ -219,7 +211,6 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
             currentTime,
             duration,
             isBuffering,
-            targetSeekPosition,
             canSeek,
             downloadProgress,
             isSeekLocked,
@@ -230,7 +221,6 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
             setCurrentTimeFromEngine,
             setDuration,
             setIsBuffering,
-            setTargetSeekPosition,
             setCanSeek,
             setDownloadProgress,
             lockSeek,
@@ -242,7 +232,6 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
             currentTime,
             duration,
             isBuffering,
-            targetSeekPosition,
             canSeek,
             downloadProgress,
             isSeekLocked,

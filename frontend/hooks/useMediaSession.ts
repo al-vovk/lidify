@@ -2,7 +2,7 @@ import { useEffect, useCallback, useRef } from "react";
 import { useAudioState, Track } from "@/lib/audio-state-context";
 import { useAudioPlayback } from "@/lib/audio-playback-context";
 import { useAudioControls } from "@/lib/audio-controls-context";
-import { audioEngine, detectAudioFormat } from "@/lib/audio-engine";
+import { audioEngine } from "@/lib/audio-engine";
 import { api } from "@/lib/api";
 
 const ARTWORK_SIZES = ["96x96", "128x128", "192x192", "256x256", "384x384", "512x512"] as const;
@@ -226,13 +226,15 @@ export function useMediaSession() {
             navigator.mediaSession.metadata = null;
         }
 
-        navigator.mediaSession.playbackState = isPlaying ? "playing" : "paused";
+        // playbackState is NOT set here — it's synced from engine events
+        // (play/pause/stop listeners below). Setting it here before audio
+        // starts causes the browser to detect a mismatch with the actual
+        // <audio> element state and override to "paused".
     }, [
         currentTrack,
         currentAudiobook,
         currentPodcast,
         playbackType,
-        isPlaying,
         getAbsoluteUrl,
         updateTrackMetadata,
     ]);
@@ -260,16 +262,18 @@ export function useMediaSession() {
         // visibilitychange handler below when the app returns to foreground.
         navigator.mediaSession.setActionHandler("play", () => {
             debounced("play", () => {
-                audioEngine.resumeAudioContext(); // fire-and-forget
                 audioEngine.forcePlay();
-                navigator.mediaSession.playbackState = "playing";
+                // Do NOT set playbackState here. Let the engine "play" event
+                // listener (below) set it after the <audio> element confirms.
+                // Setting it prematurely causes the browser to detect a mismatch
+                // with the actual element state and override to "paused".
             });
         });
 
         navigator.mediaSession.setActionHandler("pause", () => {
             debounced("pause", () => {
                 audioEngine.pause();
-                navigator.mediaSession.playbackState = "paused";
+                // Same as play — let engine "pause" event handle playbackState.
             });
         });
 
@@ -289,10 +293,8 @@ export function useMediaSession() {
                         currentIndexRef.current = prevIdx;
                         currentTrackRef.current = prevTrack;
                         // load() with autoplay=true handles both preloaded
-                        // (synchronous play) and non-preloaded (play on load).
-                        // Do NOT call forcePlay() after — it would create a
-                        // second Sound instance, causing overlapping audio.
-                        audioEngine.load(streamUrl, true, detectAudioFormat(prevTrack.filePath));
+                        // (instant swap) and non-preloaded (play on load).
+                        audioEngine.load(streamUrl, true);
                         updateTrackMetadataRef.current(prevTrack);
                         syncReactState(prevTrack, prevIdx);
                     }
@@ -318,7 +320,7 @@ export function useMediaSession() {
                         // Update refs immediately (before the OS suspends JS)
                         currentIndexRef.current = nextIdx;
                         currentTrackRef.current = nextTrack;
-                        audioEngine.load(streamUrl, true, detectAudioFormat(nextTrack.filePath));
+                        audioEngine.load(streamUrl, true);
                         updateTrackMetadataRef.current(nextTrack);
                         syncReactState(nextTrack, nextIdx);
                     }
@@ -399,6 +401,40 @@ export function useMediaSession() {
         // All other values accessed via refs. syncReactState has stable identity ([] deps).
     }, [playbackType, syncReactState]);
 
+    // Sync MediaSession playbackState from actual engine events.
+    // This is the SOLE writer of playbackState. Neither the metadata effect
+    // nor the action handlers set it — only these listeners, which fire after
+    // the <audio> element has confirmed its state via native play/pause events.
+    // This avoids the race where the browser detects a mismatch between the
+    // declared playbackState and the actual element state and overrides to "paused".
+    useEffect(() => {
+        if (!("mediaSession" in navigator)) return;
+
+        const onPlay = () => {
+            navigator.mediaSession.playbackState = "playing";
+        };
+        const onPause = () => {
+            navigator.mediaSession.playbackState = "paused";
+        };
+        const onStop = () => {
+            navigator.mediaSession.playbackState = "paused";
+        };
+        const onEnd = () => {
+            navigator.mediaSession.playbackState = "paused";
+        };
+
+        audioEngine.on("play", onPlay);
+        audioEngine.on("pause", onPause);
+        audioEngine.on("stop", onStop);
+        audioEngine.on("end", onEnd);
+        return () => {
+            audioEngine.off("play", onPlay);
+            audioEngine.off("pause", onPause);
+            audioEngine.off("stop", onStop);
+            audioEngine.off("end", onEnd);
+        };
+    }, []);
+
     // Re-sync React state when app returns to foreground.
     // Reads actual engine state — prevents unwanted resume when user
     // paused on lock screen then unlocked the phone.
@@ -445,6 +481,14 @@ export function useMediaSession() {
                     playbackRate: 1,
                     position: Math.min(currentTime, duration),
                 });
+                // Re-assert playbackState after setPositionState.
+                // Chromium macOS batches playback status + position on a 100ms
+                // debounce timer. setPositionState() restarts this timer, which
+                // can push stale state if playbackState was set before the timer
+                // fires. Re-asserting ensures the correct value is in place.
+                if (audioEngine.isPlaying()) {
+                    navigator.mediaSession.playbackState = "playing";
+                }
             } catch (error) {
                 console.warn("[MediaSession] Failed to set position state:", error);
             }
