@@ -273,6 +273,9 @@ export const AudioElement = memo(function AudioElement() {
     const saveAudiobookProgressRef = useRef(saveAudiobookProgress);
     const savePodcastProgressRef = useRef(savePodcastProgress);
     const queueRef = useRef(queue);
+    const currentIndexRef = useRef(currentIndex);
+    const isShuffleRef = useRef(isShuffle);
+    const shuffleIndicesRef = useRef(shuffleIndices);
 
     useEffect(() => {
         const handleTimeUpdate = (data: { time: number }) => {
@@ -309,6 +312,21 @@ export const AudioElement = memo(function AudioElement() {
                     audioEngine.seek(0);
                     audioEngine.play();
                 } else {
+                    // Drive audio engine directly for background reliability
+                    // (CarPlay, lock screen). React state updates via next()
+                    // may not flush when the OS suspends the app.
+                    const nextTrack = getNextTrackInfo(
+                        queueRef.current,
+                        currentIndexRef.current,
+                        isShuffleRef.current,
+                        shuffleIndicesRef.current,
+                        repeatMode,
+                    );
+                    if (nextTrack) {
+                        const streamUrl = api.getStreamUrl(nextTrack.id);
+                        audioEngine.load(streamUrl, true);
+                    }
+                    // Sync React state (committed when React can flush)
                     nextRef.current();
                 }
             } else {
@@ -708,6 +726,9 @@ export const AudioElement = memo(function AudioElement() {
         saveAudiobookProgressRef.current = saveAudiobookProgress;
         savePodcastProgressRef.current = savePodcastProgress;
         queueRef.current = queue;
+        currentIndexRef.current = currentIndex;
+        isShuffleRef.current = isShuffle;
+        shuffleIndicesRef.current = shuffleIndices;
     });
 
     useEffect(() => {
