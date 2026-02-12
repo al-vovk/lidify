@@ -69,7 +69,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
         setAudioError(null);
         // Also reset state machine if in error state
         if (playbackStateMachine.hasError) {
-            playbackStateMachine.forceTransition("IDLE");
+            playbackStateMachine.transition("IDLE");
         }
     }, []);
 

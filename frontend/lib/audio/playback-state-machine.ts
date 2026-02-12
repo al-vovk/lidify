@@ -23,18 +23,29 @@ export interface StateContext {
   lastTransitionTime: number;
 }
 
-// Valid state transitions - anything not listed is invalid
+// Valid state transitions - anything not listed is invalid.
+// LOADING and IDLE are reachable from every state (new track / stop).
+// ERROR is reachable from every non-IDLE state (failures can happen anywhere).
 const VALID_TRANSITIONS: Record<PlaybackState, PlaybackState[]> = {
   IDLE: ['LOADING'],
-  LOADING: ['READY', 'PLAYING', 'ERROR', 'IDLE'],
-  READY: ['PLAYING', 'LOADING', 'IDLE', 'SEEKING'],
+  LOADING: ['READY', 'PLAYING', 'LOADING', 'ERROR', 'IDLE'],
+  READY: ['PLAYING', 'LOADING', 'IDLE', 'SEEKING', 'ERROR'],
   PLAYING: ['PLAYING', 'READY', 'SEEKING', 'BUFFERING', 'LOADING', 'ERROR', 'IDLE'],
-  SEEKING: ['PLAYING', 'READY', 'ERROR', 'LOADING'],
-  BUFFERING: ['PLAYING', 'ERROR', 'IDLE'],
+  SEEKING: ['PLAYING', 'READY', 'LOADING', 'ERROR', 'IDLE'],
+  BUFFERING: ['PLAYING', 'READY', 'LOADING', 'ERROR', 'IDLE'],
   ERROR: ['LOADING', 'IDLE'],
 };
 
 export type StateListener = (context: StateContext) => void;
+
+interface TransitionRecord {
+  from: PlaybackState;
+  to: PlaybackState;
+  success: boolean;
+  time: number;
+}
+
+const HISTORY_SIZE = 20;
 
 export class PlaybackStateMachine {
   private context: StateContext = {
@@ -46,11 +57,11 @@ export class PlaybackStateMachine {
     lastTransitionTime: Date.now(),
   };
 
-  private listeners: Set<StateListener> = new Set();
-  private debugEnabled: boolean = false;
+  private listeners = new Set<StateListener>();
+  private debugEnabled = false;
+  private history: TransitionRecord[] = [];
 
   constructor() {
-    // Check for debug flag
     if (typeof window !== 'undefined') {
       this.debugEnabled = localStorage.getItem('lidifyAudioDebug') === '1';
     }
@@ -69,16 +80,14 @@ export class PlaybackStateMachine {
   }
 
   transition(to: PlaybackState, options?: { error?: string; errorCode?: number }): boolean {
+    const from = this.context.state;
+
     if (!this.canTransition(to)) {
-      if (this.debugEnabled) {
-        console.warn(
-          `[StateMachine] Invalid transition: ${this.context.state} → ${to}`
-        );
-      }
+      // Always warn — with a complete transition map, this indicates a bug
+      console.warn(`[StateMachine] Invalid transition: ${from} → ${to}`);
+      this.recordTransition(from, to, false);
       return false;
     }
-
-    const from = this.context.state;
 
     // Track if we were playing before seek
     if (to === 'SEEKING') {
@@ -98,35 +107,14 @@ export class PlaybackStateMachine {
       lastTransitionTime: Date.now(),
     };
 
+    this.recordTransition(from, to, true);
+
     if (this.debugEnabled) {
       console.log(`[StateMachine] ${from} → ${to}`, error ? `(${error})` : '');
     }
 
     this.notify();
     return true;
-  }
-
-  /**
-   * Force transition - bypasses validation for recovery scenarios
-   */
-  forceTransition(to: PlaybackState, options?: { error?: string; errorCode?: number }): void {
-    const from = this.context.state;
-
-    if (this.debugEnabled) {
-      console.log(`[StateMachine] FORCE: ${from} → ${to}`);
-    }
-
-    this.context = {
-      ...this.context,
-      previousState: from,
-      state: to,
-      error: to === 'ERROR' ? (options?.error ?? 'Unknown error') : null,
-      errorCode: to === 'ERROR' ? (options?.errorCode ?? null) : null,
-      wasPlayingBeforeSeek: false,
-      lastTransitionTime: Date.now(),
-    };
-
-    this.notify();
   }
 
   subscribe(listener: StateListener): () => void {
@@ -138,13 +126,13 @@ export class PlaybackStateMachine {
 
   private notify(): void {
     const ctx = this.getContext();
-    this.listeners.forEach(fn => {
+    for (const fn of this.listeners) {
       try {
         fn(ctx);
       } catch (err) {
         console.error('[StateMachine] Listener error:', err);
       }
-    });
+    }
   }
 
   reset(): void {
@@ -157,6 +145,28 @@ export class PlaybackStateMachine {
       lastTransitionTime: Date.now(),
     };
     this.notify();
+  }
+
+  private recordTransition(from: PlaybackState, to: PlaybackState, success: boolean): void {
+    if (this.history.length >= HISTORY_SIZE) {
+      this.history.shift();
+    }
+    this.history.push({ from, to, success, time: Date.now() });
+  }
+
+  /** Dump recent transition history as copyable strings. */
+  dumpHistory(): string[] {
+    return this.history.map(r => {
+      const ts = new Date(r.time).toLocaleTimeString('en-GB', {
+        hour12: false,
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        fractionalSecondDigits: 3,
+      });
+      const status = r.success ? '[ok]' : '[REJECTED]';
+      return `${r.from}→${r.to} ${status} ${ts}`;
+    });
   }
 
   // Convenience getters for common checks

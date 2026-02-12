@@ -125,6 +125,7 @@ export const AudioElement = memo(function AudioElement() {
     const preloadTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const lastPreloadedTrackIdRef = useRef<string | null>(null);
     const heartbeatRef = useRef<HeartbeatMonitor | null>(null);
+    const loadingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
     useEffect(() => {
         heartbeatRef.current = new HeartbeatMonitor({
@@ -138,7 +139,7 @@ export const AudioElement = memo(function AudioElement() {
                 console.warn("[AudioElement] Heartbeat detected unexpected stop");
                 if (playbackStateMachine.isPlaying) {
                     setIsPlaying(false);
-                    playbackStateMachine.forceTransition("READY");
+                    playbackStateMachine.transition("READY");
                 }
             },
             onBufferTimeout: () => {
@@ -153,7 +154,8 @@ export const AudioElement = memo(function AudioElement() {
             onRecovery: () => {
                 console.log("[AudioElement] Recovered from stall");
                 if (playbackStateMachine.isBuffering) {
-                    playbackStateMachine.transition("PLAYING");
+                    const target = audioEngine.isPlaying() ? "PLAYING" : "READY";
+                    playbackStateMachine.transition(target);
                     setIsBuffering(false);
                 }
             },
@@ -321,7 +323,7 @@ export const AudioElement = memo(function AudioElement() {
             const errorMessage = data.error instanceof Error
                 ? data.error.message
                 : String(data.error);
-            playbackStateMachine.forceTransition("ERROR", { error: errorMessage });
+            playbackStateMachine.transition("ERROR", { error: errorMessage });
 
             setIsPlaying(false);
             setIsBuffering(false);
@@ -365,7 +367,7 @@ export const AudioElement = memo(function AudioElement() {
         // by isLoadingRef and never reach setIsPlaying).
         const handleStop = () => {
             if (playbackStateMachine.isPlaying || playbackStateMachine.isLoading) {
-                playbackStateMachine.forceTransition("IDLE");
+                playbackStateMachine.transition("IDLE");
             }
             setIsPlaying(false);
             heartbeatRef.current?.stop();
@@ -403,7 +405,7 @@ export const AudioElement = memo(function AudioElement() {
             audioEngine.stop();
             lastTrackIdRef.current = null;
             isLoadingRef.current = false;
-            playbackStateMachine.forceTransition("IDLE");
+            playbackStateMachine.transition("IDLE");
             heartbeatRef.current?.stop();
             return;
         }
@@ -442,7 +444,26 @@ export const AudioElement = memo(function AudioElement() {
         loadIdRef.current += 1;
         const thisLoadId = loadIdRef.current;
 
-        playbackStateMachine.forceTransition("LOADING");
+        // Safety net: if loading takes longer than 15s, force-reset so the UI
+        // doesn't get stuck with an infinite spinner (e.g. the OS suspends the
+        // app mid-load and no load/error event fires).
+        if (loadingTimeoutRef.current) {
+            clearTimeout(loadingTimeoutRef.current);
+        }
+        loadingTimeoutRef.current = setTimeout(() => {
+            if (isLoadingRef.current && loadIdRef.current === thisLoadId) {
+                console.warn("[AudioElement] Loading timeout after 15s — force-resetting");
+                isLoadingRef.current = false;
+                playbackStateMachine.transition("ERROR", {
+                    error: "Loading timed out",
+                    errorCode: 408,
+                });
+                setIsBuffering(false);
+            }
+            loadingTimeoutRef.current = null;
+        }, 15000);
+
+        playbackStateMachine.transition("LOADING");
 
         let streamUrl: string | null = null;
         let startTime = 0;
@@ -498,6 +519,10 @@ export const AudioElement = memo(function AudioElement() {
                 if (loadIdRef.current !== thisLoadId) return;
 
                 isLoadingRef.current = false;
+                if (loadingTimeoutRef.current) {
+                    clearTimeout(loadingTimeoutRef.current);
+                    loadingTimeoutRef.current = null;
+                }
 
                 if (startTime > 0) {
                     audioEngine.seek(startTime);
@@ -531,6 +556,10 @@ export const AudioElement = memo(function AudioElement() {
 
             const handleLoadError = () => {
                 isLoadingRef.current = false;
+                if (loadingTimeoutRef.current) {
+                    clearTimeout(loadingTimeoutRef.current);
+                    loadingTimeoutRef.current = null;
+                }
                 audioEngine.off("load", handleLoaded);
                 audioEngine.off("loaderror", handleLoadError);
                 loadListenerRef.current = null;
@@ -930,6 +959,66 @@ export const AudioElement = memo(function AudioElement() {
         };
     }, [playbackType, isPlaying, saveAudiobookProgress, savePodcastProgress]);
 
+    // Recovery: when the app returns from background suspension, the loading
+    // state may be stuck (no load/error event ever fired). Detect this and
+    // force-recover so the user doesn't see an infinite spinner.
+    useEffect(() => {
+        function handleVisibilityChange() {
+            if (document.hidden) return;
+
+            const smContext = playbackStateMachine.getContext();
+            const smState = smContext.state;
+            const elapsed = Date.now() - smContext.lastTransitionTime;
+
+            // Case 1: isLoadingRef stuck true for > 5s
+            if (isLoadingRef.current && elapsed > 5000) {
+                console.warn("[AudioElement] Recovery: isLoadingRef stuck, resetting after", elapsed, "ms");
+                isLoadingRef.current = false;
+                if (loadingTimeoutRef.current) {
+                    clearTimeout(loadingTimeoutRef.current);
+                    loadingTimeoutRef.current = null;
+                }
+
+                if (audioEngine.isPlaying()) {
+                    playbackStateMachine.transition("PLAYING");
+                    setIsPlaying(true);
+                    setIsBuffering(false);
+                } else {
+                    playbackStateMachine.transition("IDLE");
+                    setIsPlaying(false);
+                    setIsBuffering(false);
+                    heartbeatRef.current?.stop();
+                }
+                return;
+            }
+
+            // Case 2: state machine stuck in LOADING or BUFFERING for > 10s
+            // even if isLoadingRef is false (e.g. ref was cleared but state
+            // machine never transitioned out)
+            if ((smState === "LOADING" || smState === "BUFFERING") && elapsed > 10000) {
+                console.warn("[AudioElement] Recovery: state machine stuck in", smState, "for", elapsed, "ms");
+                isLoadingRef.current = false;
+
+                if (audioEngine.isPlaying()) {
+                    playbackStateMachine.transition("PLAYING");
+                    setIsPlaying(true);
+                    setIsBuffering(false);
+                } else {
+                    // BUFFERING = track was loaded before stall → READY (can resume)
+                    // LOADING = load never completed → IDLE (must reload)
+                    const target = smState === "BUFFERING" ? "READY" : "IDLE";
+                    playbackStateMachine.transition(target);
+                    setIsPlaying(false);
+                    setIsBuffering(false);
+                    heartbeatRef.current?.stop();
+                }
+            }
+        }
+
+        document.addEventListener("visibilitychange", handleVisibilityChange);
+        return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps -- mount-only: accesses mutable state via refs; setIsPlaying/setIsBuffering are stable setState
+
     useEffect(() => {
         return () => {
             audioEngine.stop();
@@ -947,6 +1036,9 @@ export const AudioElement = memo(function AudioElement() {
             }
             if (preloadTimeoutRef.current) {
                 clearTimeout(preloadTimeoutRef.current);
+            }
+            if (loadingTimeoutRef.current) {
+                clearTimeout(loadingTimeoutRef.current);
             }
             lastPreloadedTrackIdRef.current = null;
         };

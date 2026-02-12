@@ -441,15 +441,19 @@ export function useMediaSession() {
     useEffect(() => {
         function handleVisibilityChange() {
             if (document.hidden) return;
+
+            // Always sync isPlaying and currentTime from engine truth,
+            // regardless of playbackType. This ensures audiobook/podcast
+            // recovery works after background suspension, not just tracks.
+            playbackRef.current.setIsPlaying(audioEngine.isPlaying());
+            playbackRef.current.setCurrentTime(audioEngine.getCurrentTime());
+
+            // Track-specific: sync current track and index from refs
             const track = currentTrackRef.current;
             const idx = currentIndexRef.current;
             if (track && playbackTypeRef.current === "track") {
                 stateRef.current.setCurrentTrack(track);
                 stateRef.current.setCurrentIndex(idx);
-                playbackRef.current.setCurrentTime(audioEngine.getCurrentTime());
-                // Use isPlaying() (checks audio.paused) instead of getState().isPlaying
-                // which may be stale after iOS background suspension
-                playbackRef.current.setIsPlaying(audioEngine.isPlaying());
             }
         }
         document.addEventListener("visibilitychange", handleVisibilityChange);
