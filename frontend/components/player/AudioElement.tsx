@@ -339,6 +339,12 @@ export const AudioElement = memo(function AudioElement() {
                         setCurrentIndexRef.current(result.index);
                         setCurrentTimeFromEngine(0);
                         setIsPlaying(true);
+                    } else {
+                        // Queue exhausted (no repeat) — sync React state.
+                        // Audio engine already stopped via onEnded but it
+                        // only emits "end", not "pause", so React isPlaying
+                        // would remain true without this explicit update.
+                        setIsPlaying(false);
                     }
                 }
             } else {
