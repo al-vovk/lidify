@@ -25,7 +25,7 @@ function getNextTrackInfo(
     isShuffle: boolean,
     shuffleIndices: number[],
     repeatMode: "off" | "one" | "all"
-): { id: string; filePath?: string } | null {
+): { track: { id: string; filePath?: string }; index: number } | null {
     if (queue.length === 0) return null;
 
     let nextIndex: number;
@@ -48,7 +48,8 @@ function getNextTrackInfo(
         }
     }
 
-    return queue[nextIndex] || null;
+    const track = queue[nextIndex];
+    return track ? { track, index: nextIndex } : null;
 }
 
 function podcastDebugEnabled(): boolean {
@@ -87,6 +88,7 @@ export const AudioElement = memo(function AudioElement() {
         setPlaybackType,
         queue,
         currentIndex,
+        setCurrentIndex,
         isShuffle,
         shuffleIndices,
     } = useAudioState();
@@ -276,6 +278,8 @@ export const AudioElement = memo(function AudioElement() {
     const currentIndexRef = useRef(currentIndex);
     const isShuffleRef = useRef(isShuffle);
     const shuffleIndicesRef = useRef(shuffleIndices);
+    const repeatModeRef = useRef(repeatMode);
+    const setCurrentIndexRef = useRef(setCurrentIndex);
 
     useEffect(() => {
         const handleTimeUpdate = (data: { time: number }) => {
@@ -308,26 +312,34 @@ export const AudioElement = memo(function AudioElement() {
             } else if (playbackType === "audiobook") {
                 pauseRef.current();
             } else if (playbackType === "track") {
-                if (repeatMode === "one") {
+                if (repeatModeRef.current === "one") {
                     audioEngine.seek(0);
                     audioEngine.play();
                 } else {
                     // Drive audio engine directly for background reliability
-                    // (CarPlay, lock screen). React state updates via next()
-                    // may not flush when the OS suspends the app.
-                    const nextTrack = getNextTrackInfo(
+                    // (CarPlay, lock screen). React state updates may not flush
+                    // when the OS suspends the app.
+                    const result = getNextTrackInfo(
                         queueRef.current,
                         currentIndexRef.current,
                         isShuffleRef.current,
                         shuffleIndicesRef.current,
-                        repeatMode,
+                        repeatModeRef.current,
                     );
-                    if (nextTrack) {
-                        const streamUrl = api.getStreamUrl(nextTrack.id);
+                    if (result) {
+                        // Update ref immediately so subsequent end events
+                        // (next song ending while still backgrounded) use
+                        // the correct index — mirrors useMediaSession pattern.
+                        currentIndexRef.current = result.index;
+                        const streamUrl = api.getStreamUrl(result.track.id);
                         audioEngine.load(streamUrl, true);
+                        // Sync React state (committed when React can flush).
+                        // Uses direct setters instead of next() to avoid
+                        // re-computing the index from stale React state.
+                        setCurrentIndexRef.current(result.index);
+                        setCurrentTimeFromEngine(0);
+                        setIsPlaying(true);
                     }
-                    // Sync React state (committed when React can flush)
-                    nextRef.current();
                 }
             } else {
                 pauseRef.current();
@@ -409,7 +421,8 @@ export const AudioElement = memo(function AudioElement() {
             audioEngine.off("pause", handlePause);
             audioEngine.off("stop", handleStop);
         };
-    }, [playbackType, currentTrack, currentAudiobook, currentPodcast, repeatMode, setCurrentTimeFromEngine, setDuration, setIsPlaying, setIsBuffering, setCurrentAudiobook, setCurrentPodcast, setPlaybackType]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- repeatMode accessed via repeatModeRef for background reliability
+    }, [playbackType, currentTrack, currentAudiobook, currentPodcast, setCurrentTimeFromEngine, setDuration, setIsPlaying, setIsBuffering, setCurrentAudiobook, setCurrentPodcast, setPlaybackType]);
 
     useEffect(() => {
         const currentMediaId =
@@ -623,7 +636,7 @@ export const AudioElement = memo(function AudioElement() {
             preloadTimeoutRef.current = null;
         }
 
-        const nextTrack = getNextTrackInfo(
+        const result = getNextTrackInfo(
             queue,
             currentIndex,
             isShuffle,
@@ -631,14 +644,14 @@ export const AudioElement = memo(function AudioElement() {
             repeatMode
         );
 
-        if (!nextTrack || nextTrack.id === lastPreloadedTrackIdRef.current) {
+        if (!result || result.track.id === lastPreloadedTrackIdRef.current) {
             return;
         }
 
         preloadTimeoutRef.current = setTimeout(() => {
-            const streamUrl = api.getStreamUrl(nextTrack.id);
+            const streamUrl = api.getStreamUrl(result.track.id);
             audioEngine.preload(streamUrl);
-            lastPreloadedTrackIdRef.current = nextTrack.id;
+            lastPreloadedTrackIdRef.current = result.track.id;
         }, 2000);
 
         return () => {
@@ -729,6 +742,8 @@ export const AudioElement = memo(function AudioElement() {
         currentIndexRef.current = currentIndex;
         isShuffleRef.current = isShuffle;
         shuffleIndicesRef.current = shuffleIndices;
+        repeatModeRef.current = repeatMode;
+        setCurrentIndexRef.current = setCurrentIndex;
     });
 
     useEffect(() => {
